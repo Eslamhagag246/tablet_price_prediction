@@ -261,9 +261,9 @@ def load_and_train():
         mae        = mae_gb if r2_gb >= r2_rf else mae_rf
 
         # Save for next time
-        joblib.dump(model,      'final_project/tablets/tablet_model.pkl')
-        joblib.dump(le_brand,   'final_project/tablets/le_brand.pkl')
-        joblib.dump(le_website, 'final_project/tablets/le_website.pkl')
+        joblib.dump(model,      'tablet_model.pkl')
+        joblib.dump(le_brand,   'le_brand.pkl')
+        joblib.dump(le_website, 'le_website.pkl')
 
     return df, le_brand, le_website, FEATURES, model, model_name, r2, mae
 def find_product(df, brand, ram, storage, website):
