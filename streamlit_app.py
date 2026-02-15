@@ -197,7 +197,7 @@ import os
 
 @st.cache_resource(show_spinner="Loading model...")
 def load_and_train():
-    df = pd.read_csv('final_project/tablets/tablets_cleaned_clean.csv')
+    df = pd.read_csv('tablets_cleaned_clean.csv')
     
     df['price']   = df['price'].str.replace('EGP', '', regex=False)\
                                .str.replace(',', '', regex=False)\
@@ -220,9 +220,9 @@ def load_and_train():
 
     if os.path.exists('tablet_model.pkl'):
     
-        model      = joblib.load('final_project/tablets/tablet_model.pkl')
-        le_brand   = joblib.load('final_project/tablets/le_brand.pkl')
-        le_website = joblib.load('final_project/tablets/le_website.pkl')
+        model      = joblib.load('tablet_model.pkl')
+        le_brand   = joblib.load('le_brand.pkl')
+        le_website = joblib.load('le_website.pkl')
 
         # Still encode df so find_product() works
         df['brand_enc']   = le_brand.transform(df['brand'])
