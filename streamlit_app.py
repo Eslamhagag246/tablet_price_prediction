@@ -4,12 +4,8 @@ import numpy as np
 import warnings
 warnings.filterwarnings('ignore')
 
-import joblib
-import os
-
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-from sklearn.metrics import r2_score, mean_absolute_error
 from sklearn.preprocessing import LabelEncoder
 from datetime import datetime
 
@@ -192,80 +188,58 @@ hr {
 # ─────────────────────────────────────────
 # LOAD & TRAIN MODEL (cached)
 # ─────────────────────────────────────────
-import joblib
-import os
-
-@st.cache_resource(show_spinner="Loading model...")
+@st.cache_resource(show_spinner="Training model on your data...")
 def load_and_train():
     df = pd.read_csv('tablets_cleaned_clean.csv')
-    
+
     df['price']   = df['price'].str.replace('EGP', '', regex=False)\
                                .str.replace(',', '', regex=False)\
                                .str.strip().astype(float)
     df['brand']   = df['brand'].str.lower().str.strip()
     df['website'] = df['website'].str.lower().str.strip()
     df['stock']   = df['stock'].str.lower().str.strip()
+
     df['timestamp'] = pd.to_datetime(df['timestamp'])
     df['year']      = df['timestamp'].dt.year
     df['month']     = df['timestamp'].dt.month
     df['day']       = df['timestamp'].dt.day
     df['dayofweek'] = df['timestamp'].dt.dayofweek
+
     df['ram_gb']            = df['ram_gb'].fillna(df['ram_gb'].median())
     df['ram_storage_ratio'] = df['ram_gb'] / (df['storage_gb'] + 1)
     df['storage_per_egp']   = df['storage_gb'] / df['price']
+
+    le_brand   = LabelEncoder()
+    le_website = LabelEncoder()
+    df['brand_enc']   = le_brand.fit_transform(df['brand'])
+    df['website_enc'] = le_website.fit_transform(df['website'])
 
     FEATURES = ['ram_gb','storage_gb','brand_enc','website_enc',
                 'year','month','day','dayofweek',
                 'ram_storage_ratio','storage_per_egp']
 
-    if os.path.exists('tablet_model.pkl'):
-    
-        model      = joblib.load('tablet_model.pkl')
-        le_brand   = joblib.load('le_brand.pkl')
-        le_website = joblib.load('le_website.pkl')
+    X = df[FEATURES]
+    y = df['price']
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-        # Still encode df so find_product() works
-        df['brand_enc']   = le_brand.transform(df['brand'])
-        df['website_enc'] = le_website.transform(df['website'])
+    rf = RandomForestRegressor(n_estimators=300, max_features='sqrt', random_state=42, n_jobs=-1)
+    rf.fit(X_train, y_train)
 
-        model_name = type(model).__name__
-        r2  = None   
-        mae = None
+    gb = GradientBoostingRegressor(n_estimators=500, learning_rate=0.05, max_depth=6,
+                                    subsample=0.8, min_samples_split=4, min_samples_leaf=2, random_state=42)
+    gb.fit(X_train, y_train)
 
-    else:
-       
-        le_brand   = LabelEncoder()
-        le_website = LabelEncoder()
-        df['brand_enc']   = le_brand.fit_transform(df['brand'])
-        df['website_enc'] = le_website.fit_transform(df['website'])
+    r2_rf  = r2_score(y_test, rf.predict(X_test))
+    r2_gb  = r2_score(y_test, gb.predict(X_test))
+    mae_rf = mean_absolute_error(y_test, rf.predict(X_test))
+    mae_gb = mean_absolute_error(y_test, gb.predict(X_test))
 
-        X = df[FEATURES]
-        y = df['price']
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    best_model      = gb if r2_gb >= r2_rf else rf
+    best_model_name = "Gradient Boosting" if r2_gb >= r2_rf else "Random Forest"
 
-        rf = RandomForestRegressor(n_estimators=300, max_features='sqrt', random_state=42, n_jobs=-1)
-        rf.fit(X_train, y_train)
+    return df, le_brand, le_website, FEATURES, best_model, best_model_name
 
-        gb = GradientBoostingRegressor(n_estimators=500, learning_rate=0.05, max_depth=6,
-                                       subsample=0.8, min_samples_split=4, min_samples_leaf=2, random_state=42)
-        gb.fit(X_train, y_train)
 
-        r2_rf = r2_score(y_test, rf.predict(X_test))
-        r2_gb = r2_score(y_test, gb.predict(X_test))
-        mae_rf = mean_absolute_error(y_test, rf.predict(X_test))
-        mae_gb = mean_absolute_error(y_test, gb.predict(X_test))
-
-        model      = gb if r2_gb >= r2_rf else rf
-        model_name = "Gradient Boosting" if r2_gb >= r2_rf else "Random Forest"
-        r2         = r2_gb if r2_gb >= r2_rf else r2_rf
-        mae        = mae_gb if r2_gb >= r2_rf else mae_rf
-
-        # Save for next time
-        joblib.dump(model,      'tablet_model.pkl')
-        joblib.dump(le_brand,   'le_brand.pkl')
-        joblib.dump(le_website, 'le_website.pkl')
-
-    return df, le_brand, le_website, FEATURES, model, model_name, r2, mae
 def find_product(df, brand, ram, storage, website):
     subset = df[(df['brand']==brand) & (df['ram_gb']==ram) &
                 (df['storage_gb']==storage) & (df['website']==website)]
@@ -298,7 +272,7 @@ def predict_prices(df, le_brand, le_website, FEATURES, model, brand, ram, storag
 # ─────────────────────────────────────────
 # LOAD DATA & MODEL
 # ─────────────────────────────────────────
-df, le_brand, le_website, FEATURES, model, model_name, r2, mae = load_and_train()
+df, le_brand, le_website, FEATURES, model, model_name = load_and_train()
 KNOWN_BRANDS = sorted(df['brand'].unique().tolist())
 
 # ─────────────────────────────────────────
@@ -307,25 +281,7 @@ KNOWN_BRANDS = sorted(df['brand'].unique().tolist())
 st.markdown('<div class="hero-title">📱 Tablet Price Predictor</div>', unsafe_allow_html=True)
 st.markdown('<div class="hero-sub">Find the best deal across all Egyptian e-commerce websites</div>', unsafe_allow_html=True)
 
-# Model metrics
-st.markdown(f"""
-<div class="metric-row">
-  <div class="metric-box">
-    <div class="metric-label">Model</div>
-    <div class="metric-value" style="font-size:0.95rem">{model_name}</div>
-  </div>
-  <div class="metric-box">
-    <div class="metric-label">R² Score</div>
-    <div class="metric-value">{r2:.4f}</div>
-  </div>
-  <div class="metric-box">
-    <div class="metric-label">MAE</div>
-    <div class="metric-value" style="font-size:1rem">EGP {mae:,.0f}</div>
-  </div>
-</div>
-""", unsafe_allow_html=True)
 
-st.markdown("---")
 
 # ─────────────────────────────────────────
 # UI — INPUT FORM
@@ -370,19 +326,27 @@ if predict_btn:
         medals = ['🥇', '🥈', '🥉']
 
         for i, r in enumerate(results):
-            medal    = medals[i] if i < 3 else f"{i+1}."
-            is_best  = i == 0
-            is_worst = i == len(results) - 1
-            card_cls = "result-card best" if is_best else "result-card"
-            badge    = '<span class="badge-best">Best Deal</span>' if is_best else ""
+            import html as html_lib
+            medal     = medals[i] if i < 3 else f"{i+1}."
+            is_best   = i == 0
+            is_worst  = i == len(results) - 1
+            card_cls  = "result-card best" if is_best else "result-card"
+            badge     = '<span class="badge-best">Best Deal</span>' if is_best else ""
             price_cls = "price-tag expensive" if is_worst else "price-tag"
-            url_display = r['url'] if r['url'] != '#' else 'N/A'
-            url_html = (f'<a href="{r["url"]}" target="_blank" class="url-link">🔗 {url_display}</a>'
-                        if r['url'] != '#' else '<span class="url-link">URL not available</span>')
+
+            # Escape special characters to prevent HTML breaking
+            safe_name = html_lib.escape(str(r['name']))
+            safe_url  = html_lib.escape(str(r['url'])) if r['url'] != '#' else '#'
+
+            url_html = (
+                f'<a href="{safe_url}" target="_blank" class="url-link">🔗 {safe_url}</a>'
+                if r['url'] != '#'
+                else '<span class="url-link" style="color:#444">URL not available</span>'
+            )
 
             st.markdown(f"""
             <div class="{card_cls}">
-                <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
                     <div>
                         <span style="font-size:1.4rem">{medal}</span>
                         <span class="website-name">&nbsp;{r['website']}</span>
@@ -390,8 +354,8 @@ if predict_btn:
                     </div>
                     <div class="{price_cls}">EGP {r['price']:,.2f}</div>
                 </div>
-                <div class="product-name">📦 {r['name']}</div>
-                <div style="margin-top:0.4rem">{url_html}</div>
+                <div class="product-name" style="margin-top:0.5rem;">📦 {safe_name}</div>
+                <div style="margin-top:0.4rem;">{url_html}</div>
             </div>
             """, unsafe_allow_html=True)
 
