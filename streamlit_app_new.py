@@ -183,9 +183,9 @@ def forecast_product(pdf, days_ahead=7):
     # Clip forecast to realistic range (not below 50% of min, not above 150% of max)
     forecast = np.clip(forecast, min_price * 0.5, max_price * 1.5)
 
-     today = datetime.today().date()
-    forecast_dates = [datetime.combine(today, datetime.min.time()) + timedelta(days=i)
-                      for i in range(1, days_ahead + 1)]
+    # Forecast dates — start from TODAY (the moment the user searches)
+    today = pd.Timestamp.today().normalize()
+    forecast_dates = [today + timedelta(days=i) for i in range(1, days_ahead + 1)]
 
     # Trend slope
     slope = (forecast[-1] - last_price) / days_ahead
@@ -300,8 +300,8 @@ def chart_price_history(result):
         hoverinfo='skip'
     ))
 
-    # Vertical divider
-    today_str = str(pdf['date'].max().date())
+    # Vertical divider at today
+    today_str = str(pd.Timestamp.today().date())
     fig.add_shape(
         type="line",
         x0=today_str, x1=today_str,
@@ -773,6 +773,10 @@ with tab3:
             yaxis=dict(gridcolor=CHART_GRID, tickfont=dict(size=10)),
             height=520,
             margin=dict(l=10, r=10, t=50, b=10)
+        )
+        st.plotly_chart(fig_changes, use_container_width=True)
+    else:
+        st.info("Not enough data to calculate price changes yet.")
         )
         st.plotly_chart(fig_changes, use_container_width=True)
     else:
