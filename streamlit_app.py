@@ -348,42 +348,55 @@ if predict_btn:
         medals = ['🥇', '🥈', '🥉']
 
         for i, r in enumerate(results):
-            import html as html_lib
-            medal     = medals[i] if i < 3 else f"{i+1}."
-            is_best   = i == 0
-            is_worst  = i == len(results) - 1
-            card_cls  = "result-card best" if is_best else "result-card"
-            badge     = '<span class="badge-best">Best Deal</span>' if is_best else ""
-            price_cls = "price-tag expensive" if is_worst else "price-tag"
+            medal    = medals[i] if i < 3 else f"{i+1}."
+            is_best  = i == 0
+            is_worst = i == len(results) - 1
+            border   = "2px solid #00d4ff55" if is_best else "1px solid #1e2535"
+            bg       = "linear-gradient(135deg, #0d1f2d 0%, #141927 100%)" if is_best else "#141927"
+            price_color = "#ff6b6b" if is_worst else "#00d4ff"
 
-            # Escape special characters to prevent HTML breaking
-            safe_name = html_lib.escape(str(r['name']))
-            safe_url  = html_lib.escape(str(r['url'])) if r['url'] != '#' else '#'
-
-            url_html = (
-                f'<a href="{safe_url}" target="_blank" class="url-link">🔗 {safe_url}</a>'
-                if r['url'] != '#'
-                else '<span class="url-link" style="color:#444">URL not available</span>'
-            )
-
-            st.markdown(f"""
-            <div class="{card_cls}">
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <div>
-                        <span style="font-size:1.4rem">{medal}</span>
-                        <span class="website-name">&nbsp;{r['website']}</span>
-                        {badge}
+            with st.container():
+                st.markdown(f"""
+                <div style="background:{bg}; border:{border}; border-radius:16px;
+                            padding:1.2rem 1.5rem; margin-bottom:0.8rem;">
+                    <div style="display:flex; justify-content:space-between;
+                                align-items:center; flex-wrap:wrap; gap:0.5rem;">
+                        <div>
+                            <span style="font-size:1.4rem;">{medal}</span>
+                            <span style="font-family:'Syne',sans-serif; font-size:1.1rem;
+                                         font-weight:700; color:#e8eaf0;">&nbsp;{r['website']}</span>
+                            {"&nbsp;<span style='display:inline-block;background:linear-gradient(135deg,#00d4ff22,#7b5cf022);border:1px solid #00d4ff55;color:#00d4ff;font-size:0.7rem;font-weight:600;padding:2px 10px;border-radius:20px;letter-spacing:0.08em;text-transform:uppercase;'>BEST DEAL</span>" if is_best else ""}
+                        </div>
+                        <div style="font-family:'Syne',sans-serif; font-size:1.4rem;
+                                    font-weight:700; color:{price_color};">
+                            EGP {r['price']:,.2f}
+                        </div>
                     </div>
-                    <div class="{price_cls}">EGP {r['price']:,.2f}</div>
+                    <div style="font-size:0.85rem; color:#8b92a5; margin-top:0.5rem;">
+                        📦 {r['name']}
+                    </div>
                 </div>
-                <div class="product-name">📦 {r['name']}</div>
-                <div style="margin-top:0.4rem">{url_html}</div>
-            </div>
-            """, unsafe_allow_html=True)
+                """, unsafe_allow_html=True)
 
-        # Savings summary
+                if r['url'] and r['url'] != '#':
+                    st.markdown(
+                        f"""<div style="margin-top:-0.6rem; margin-bottom:0.6rem;
+                                        padding: 0 1.5rem;">
+                            <a href="{r['url']}" target="_blank"
+                               style="font-size:0.78rem; color:#7b5cf0;
+                                      word-break:break-all; text-decoration:none;">
+                               🔗 {r['url']}
+                            </a></div>""",
+                        unsafe_allow_html=True
+                    )
+
+         # Savings summary
         st.markdown(f"""
-        <div class="saving-box">
+        <div style="background:linear-gradient(135deg,#0d2b1d,#0b1a12);
+                    border:1px solid #00ff8833; border-radius:12px;
+                    padding:1rem 1.5rem; margin-top:1rem;
+                    color:#00ff88; font-family:'Syne',sans-serif;
+                    font-size:1rem; font-weight:600;">
             💸 Buy from <strong>{best['website']}</strong> and save
             <strong>EGP {saving:,.2f}</strong> vs {worst['website']}
         </div>
