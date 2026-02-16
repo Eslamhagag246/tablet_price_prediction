@@ -183,8 +183,9 @@ def forecast_product(pdf, days_ahead=7):
     # Clip forecast to realistic range (not below 50% of min, not above 150% of max)
     forecast = np.clip(forecast, min_price * 0.5, max_price * 1.5)
 
-    # Forecast dates
-    forecast_dates = [last_date + timedelta(days=i) for i in range(1, days_ahead + 1)]
+     today = datetime.today().date()
+    forecast_dates = [datetime.combine(today, datetime.min.time()) + timedelta(days=i)
+                      for i in range(1, days_ahead + 1)]
 
     # Trend slope
     slope = (forecast[-1] - last_price) / days_ahead
