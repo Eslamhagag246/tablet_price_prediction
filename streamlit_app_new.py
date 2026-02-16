@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 import warnings
 import plotly.graph_objects as go
-import plotly.express as px
 from plotly.subplots import make_subplots
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import PolynomialFeatures
@@ -301,12 +300,20 @@ def chart_price_history(result):
     ))
 
     # Vertical divider
-    fig.add_vline(
-        x=str(pdf['date'].max()),
-        line_width=1, line_dash='dot',
-        line_color='#444',
-        annotation_text='Today',
-        annotation_font_color='#888'
+    today_str = str(pdf['date'].max().date())
+    fig.add_shape(
+        type="line",
+        x0=today_str, x1=today_str,
+        y0=0, y1=1,
+        xref="x", yref="paper",
+        line=dict(color="#444", width=1, dash="dot")
+    )
+    fig.add_annotation(
+        x=today_str, y=1,
+        xref="x", yref="paper",
+        text="Today", showarrow=False,
+        font=dict(color="#888", size=11),
+        yanchor="bottom"
     )
 
     fig.update_layout(
@@ -331,10 +338,16 @@ def chart_price_distribution(pdf):
         name='Price Distribution',
         hovertemplate='EGP %{x:,.0f}<br>Count: %{y}<extra></extra>'
     ))
-    fig.add_vline(x=pdf['price'].mean(), line_color='#00d4ff', line_dash='dash',
-                  annotation_text='Mean', annotation_font_color='#00d4ff')
-    fig.add_vline(x=pdf['price'].iloc[-1], line_color='#ffd166', line_dash='dot',
-                  annotation_text='Current', annotation_font_color='#ffd166')
+    mean_price = pdf['price'].mean()
+    curr_price = pdf['price'].iloc[-1]
+    fig.add_shape(type="line", x0=mean_price, x1=mean_price, y0=0, y1=1,
+                  xref="x", yref="paper", line=dict(color="#00d4ff", width=1.5, dash="dash"))
+    fig.add_annotation(x=mean_price, y=1, xref="x", yref="paper",
+                       text="Mean", showarrow=False, font=dict(color="#00d4ff", size=11), yanchor="bottom")
+    fig.add_shape(type="line", x0=curr_price, x1=curr_price, y0=0, y1=1,
+                  xref="x", yref="paper", line=dict(color="#ffd166", width=1.5, dash="dot"))
+    fig.add_annotation(x=curr_price, y=0.85, xref="x", yref="paper",
+                       text="Current", showarrow=False, font=dict(color="#ffd166", size=11), yanchor="bottom")
 
     fig.update_layout(
         title=dict(text='📊 Price Distribution', font=dict(family='Syne', size=16, color='#e8eaf0')),
@@ -356,7 +369,8 @@ def chart_price_volatility(pdf):
         name='Daily Change %',
         hovertemplate='%{x}<br>%{y:.2f}%<extra></extra>'
     ))
-    fig.add_hline(y=0, line_color='#444', line_width=1)
+    fig.add_shape(type="line", x0=0, x1=1, y0=0, y1=0,
+                  xref="paper", yref="y", line=dict(color="#444", width=1))
 
     fig.update_layout(
         title=dict(text='📉 Daily Price Change %', font=dict(family='Syne', size=16, color='#e8eaf0')),
@@ -374,14 +388,15 @@ def chart_all_products_overview(df):
     brand_time = df.groupby(['brand', 'date'])['price'].mean().reset_index()
     brand_time['date'] = pd.to_datetime(brand_time['date'])
 
-    colors = px.colors.qualitative.Vivid
+    BRAND_COLORS = ['#00d4ff','#7b5cf0','#ff6b9d','#ffd166','#00ff88',
+                    '#ff9966','#a78bfa','#34d399','#f472b6','#60a5fa','#fb923c']
     fig = go.Figure()
     for idx, brand in enumerate(brand_time['brand'].unique()):
         bdf = brand_time[brand_time['brand'] == brand]
         fig.add_trace(go.Scatter(
             x=bdf['date'], y=bdf['price'],
             mode='lines', name=brand.title(),
-            line=dict(color=colors[idx % len(colors)], width=2),
+            line=dict(color=BRAND_COLORS[idx % len(BRAND_COLORS)], width=2),
             hovertemplate=f'{brand.title()}<br>%{{x}}<br>EGP %{{y:,.0f}}<extra></extra>'
         ))
 
@@ -641,7 +656,7 @@ with tab2:
     d3.markdown(f"""<div class="stat-card">
         <div class="stat-label">Date Range</div>
         <div class="stat-value" style="color:#ffd166; font-size:0.9rem">
-            {df['date'].min().strftime('%b %d')} → {df['date'].max().strftime('%b %d, %Y')}
+            {pd.to_datetime(df['date'].min()).strftime('%b %d')} → {pd.to_datetime(df['date'].max()).strftime('%b %d, %Y')}
         </div>
     </div>""", unsafe_allow_html=True)
     d4.markdown(f"""<div class="stat-card">
@@ -658,15 +673,17 @@ with tab2:
     # Price observations per product histogram
     obs_counts = df.groupby('product_key')['price'].count().reset_index()
     obs_counts.columns = ['product_key', 'observations']
-    fig_obs = px.histogram(
-        obs_counts, x='observations', nbins=20,
-        title='📦 How Many Price Points Per Product',
-        color_discrete_sequence=['#7b5cf0']
-    )
+    fig_obs = go.Figure(go.Histogram(
+        x=obs_counts['observations'],
+        nbinsx=20,
+        marker=dict(color='#7b5cf0', opacity=0.85, line=dict(color='#080c14', width=1)),
+        hovertemplate='Observations: %{x}<br>Products: %{y}<extra></extra>'
+    ))
     fig_obs.update_layout(
+        title=dict(text='📦 How Many Price Points Per Product',
+                   font=dict(family='Syne', size=16, color='#e8eaf0')),
         plot_bgcolor=CHART_BG, paper_bgcolor=CHART_BG,
         font=dict(family='DM Sans', color='#8b92a5'),
-        title_font=dict(family='Syne', size=16, color='#e8eaf0'),
         xaxis=dict(gridcolor=CHART_GRID, title='Number of Observations'),
         yaxis=dict(gridcolor=CHART_GRID, title='Number of Products'),
         margin=dict(l=10, r=10, t=50, b=10)
@@ -688,55 +705,74 @@ with tab3:
         if len(grp) >= 3:
             first = grp['price'].iloc[0]
             last  = grp['price'].iloc[-1]
-            pct   = (last - first) / first * 100
+            if first > 0:
+                pct = (last - first) / first * 100
+            else:
+                continue
             changes.append({
-                'Product'       : grp['name'].iloc[0],
-                'Website'       : grp['website'].iloc[0].upper(),
-                'Start Price'   : first,
-                'Current Price' : last,
-                'Change %'      : round(pct, 1),
-                'Observations'  : len(grp)
+                'Product'      : grp['name'].iloc[0],
+                'Website'      : grp['website'].iloc[0].upper(),
+                'Start Price'  : first,
+                'Current Price': last,
+                'Change %'     : round(pct, 1),
+                'Observations' : len(grp)
             })
 
-    changes_df = pd.DataFrame(changes).sort_values('Change %')
+    changes_df = pd.DataFrame(changes).sort_values('Change %').reset_index(drop=True)
 
     if not changes_df.empty:
-        # Top 10 biggest drops and rises
         col_i1, col_i2 = st.columns(2)
 
         with col_i1:
             st.markdown("#### 🟢 Biggest Price Drops")
-            drops = changes_df.head(5)[['Product','Website','Change %','Current Price']]
+            drops = changes_df.head(5)[['Product','Website','Change %','Current Price']].copy()
             drops['Current Price'] = drops['Current Price'].apply(lambda x: f"EGP {x:,.0f}")
-            drops['Change %'] = drops['Change %'].apply(lambda x: f"{x:.1f}%")
+            drops['Change %']      = drops['Change %'].apply(lambda x: f"{x:.1f}%")
             st.dataframe(drops, use_container_width=True, hide_index=True)
 
         with col_i2:
             st.markdown("#### 🔴 Biggest Price Rises")
-            rises = changes_df.tail(5).iloc[::-1][['Product','Website','Change %','Current Price']]
+            rises = changes_df.tail(5).iloc[::-1][['Product','Website','Change %','Current Price']].copy()
             rises['Current Price'] = rises['Current Price'].apply(lambda x: f"EGP {x:,.0f}")
-            rises['Change %'] = rises['Change %'].apply(lambda x: f"+{x:.1f}%")
+            rises['Change %']      = rises['Change %'].apply(lambda x: f"+{x:.1f}%")
             st.dataframe(rises, use_container_width=True, hide_index=True)
 
-        # Bar chart of all price changes
-        top_changes = pd.concat([changes_df.head(10), changes_df.tail(10)]).drop_duplicates()
-        top_changes['label']  = top_changes['Product'].str[:30] + ' | ' + top_changes['Website']
-        top_changes['color'] = top_changes['Change %'].apply(lambda x: '#00ff88' if x < 0 else '#ff6b6b')
+        # Bar chart — build colors list separately to avoid plotly issues
+        top_changes = pd.concat([
+            changes_df.head(10), changes_df.tail(10)
+        ]).drop_duplicates().reset_index(drop=True)
 
-        fig_changes = go.Figure(go.Bar(
-            x=top_changes['Change %'],
-            y=top_changes['label'],
+        top_changes['label'] = (
+            top_changes['Product'].str[:28] + ' | ' + top_changes['Website']
+        )
+        bar_colors = ['#00ff88' if x < 0 else '#ff6b6b'
+                      for x in top_changes['Change %'].tolist()]
+
+        fig_changes = go.Figure()
+        fig_changes.add_trace(go.Bar(
+            x=top_changes['Change %'].tolist(),
+            y=top_changes['label'].tolist(),
             orientation='h',
-            marker_color=top_changes['color'],
+            marker=dict(color=bar_colors),
             hovertemplate='%{y}<br>Change: %{x:.1f}%<extra></extra>'
         ))
-        fig_changes.add_vline(x=0, line_color='#444', line_width=1)
+        fig_changes.add_shape(
+            type="line", x0=0, x1=0, y0=0, y1=1,
+            xref="x", yref="paper",
+            line=dict(color="#666", width=1.5)
+        )
         fig_changes.update_layout(
-            title=dict(text='💹 Price Change % Since First Observation', font=dict(family='Syne', size=16, color='#e8eaf0')),
+            title=dict(
+                text='💹 Price Change % Since First Observation',
+                font=dict(family='Syne', size=16, color='#e8eaf0')
+            ),
             plot_bgcolor=CHART_BG, paper_bgcolor=CHART_BG,
             font=dict(family='DM Sans', color='#8b92a5'),
             xaxis=dict(gridcolor=CHART_GRID, title='Change %', ticksuffix='%'),
             yaxis=dict(gridcolor=CHART_GRID, tickfont=dict(size=10)),
-            height=500, margin=dict(l=10, r=10, t=50, b=10)
+            height=520,
+            margin=dict(l=10, r=10, t=50, b=10)
         )
         st.plotly_chart(fig_changes, use_container_width=True)
+    else:
+        st.info("Not enough data to calculate price changes yet.")
