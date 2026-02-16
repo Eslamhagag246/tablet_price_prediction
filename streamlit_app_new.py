@@ -777,4 +777,3 @@ with tab3:
         st.plotly_chart(fig_changes, use_container_width=True)
     else:
         st.info("Not enough data to calculate price changes yet.")
-        )
