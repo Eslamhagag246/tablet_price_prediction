@@ -150,8 +150,8 @@ def forecast_product(pdf, days_ahead=7):
     # Never predict below 50% of min or above 150% of max seen
     forecast = np.clip(forecast, min_price * 0.5, max_price * 1.5)
 
-    # ── Forecast dates ──
-    forecast_dates = [last_date + timedelta(days=i) for i in range(1, days_ahead + 1)]
+    today = pd.Timestamp.today().normalize()
+    forecast_dates = [today + timedelta(days=i) for i in range(1, days_ahead + 1)]
 
     # ── Trend: % change from today to day 7 ──
     trend_pct = (forecast[-1] - last_price) / last_price * 100
