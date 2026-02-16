@@ -258,8 +258,7 @@ def chart_price_history(result):
     mae   = result['mae']
 
     fig = go.Figure()
-
-    # Historical line
+    
     fig.add_trace(go.Scatter(
         x=pdf['date'], y=pdf['price'],
         mode='lines+markers',
@@ -277,7 +276,21 @@ def chart_price_history(result):
         hovertemplate='%{x}<br>Avg EGP %{y:,.0f}<extra></extra>'
     ))
 
-    # Forecast line
+    last_hist_date  = pdf['date'].iloc[-1]
+    last_hist_price = pdf['price'].iloc[-1]
+    first_fore_date  = fdates[0]
+    first_fore_price = fprices[0]
+
+    fig.add_trace(go.Scatter(
+        x=[last_hist_date, first_fore_date],
+        y=[last_hist_price, first_fore_price],
+        mode='lines',
+        name='Bridge',
+        line=dict(color='#ffd166', width=1.5, dash='dot'),
+        showlegend=False,
+        hoverinfo='skip'
+    ))
+
     fig.add_trace(go.Scatter(
         x=fdates, y=fprices,
         mode='lines+markers', name='Forecast',
@@ -286,21 +299,20 @@ def chart_price_history(result):
         hovertemplate='%{x}<br>Forecast EGP %{y:,.0f}<extra></extra>'
     ))
 
-    # Confidence band
-    upper = [p + mae for p in fprices]
-    lower = [max(p - mae, 0) for p in fprices]
+    band_dates  = [last_hist_date, first_fore_date] + fdates[1:]
+    band_prices = [last_hist_price, first_fore_price] + list(fprices[1:])
+    upper = [p + mae for p in band_prices]
+    lower = [max(p - mae, 0) for p in band_prices]
 
     fig.add_trace(go.Scatter(
-        x=fdates + fdates[::-1],
+        x=band_dates + band_dates[::-1],
         y=upper + lower[::-1],
         fill='toself',
-        fillcolor='rgba(255,209,102,0.10)',
+        fillcolor='rgba(255,209,102,0.08)',
         line=dict(color='rgba(0,0,0,0)'),
         name='Confidence Band',
         hoverinfo='skip'
     ))
-
-    # Vertical divider at today
     today_str = str(pd.Timestamp.today().date())
     fig.add_shape(
         type="line",
@@ -329,8 +341,7 @@ def chart_price_history(result):
         margin=dict(l=10, r=10, t=50, b=10)
     )
     return fig
-
-
+    
 def chart_price_distribution(pdf):
     fig = go.Figure()
     fig.add_trace(go.Histogram(
