@@ -100,27 +100,6 @@ def load_data():
     df['brand']   = df['brand'].str.lower().str.strip()
     df['website'] = df['website'].str.lower().str.strip()
     df['name']    = df['name'].str.strip()
-    def clean_name(name):
-        if not isinstance(name, str):
-            return name
-
-        # Remove repeated 'Without' patterns (e.g. "Without Without", "Without Space")
-        name = re.sub(r'\s+Without(\s+Without)*(\s+\w+)?$', '', name, flags=re.IGNORECASE)
-        name = re.sub(r'\s+Without$', '', name, flags=re.IGNORECASE)
-
-        # Remove trailing/leading whitespace left after cleaning
-        name = name.strip()
-
-        # Remove duplicate consecutive words (e.g. "Honor Honor" → "Honor")
-        words = name.split()
-        cleaned = [words[0]] if words else []
-        for w in words[1:]:
-            if w.lower() != cleaned[-1].lower():
-                cleaned.append(w)
-        name = ' '.join(cleaned)
-        return name
-        
-    df['name'] = df['name'].apply(clean_name)
     # Parse timestamp
     df['timestamp'] = pd.to_datetime(df['timestamp'])
     df['date']      = df['timestamp'].dt.date
