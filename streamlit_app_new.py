@@ -87,7 +87,7 @@ hr { border-color: #1e2535 !important; }
 # ─────────────────────────────────────────
 # 1. LOAD & PREPROCESS DATA
 # ─────────────────────────────────────────
-@st.cache_data
+@st.cache_data(ttl=86400)
 def load_data():
     df = pd.read_csv('tablets_cleaned_clean.csv')
 
@@ -458,6 +458,13 @@ df = load_data()
 st.markdown('<div class="hero-title">📊 Tablet Price Tracker</div>', unsafe_allow_html=True)
 st.markdown('<div class="hero-sub">Track price history · Forecast next 7 days · Know when to buy</div>', unsafe_allow_html=True)
 
+last_data_date = pd.to_datetime(df['date'].max()).strftime('%B %d, %Y')
+st.markdown(f"""
+<div style="text-align:center; color:#6b7280; font-size:0.8rem; margin-top:-0.5rem; margin-bottom:1rem;">
+    📅 Data last updated: {last_data_date}
+</div>
+""", unsafe_allow_html=True
+
 # ─────────────────────────────────────────
 # 7. TABS
 # ─────────────────────────────────────────
@@ -519,6 +526,13 @@ with tab1:
         if selected_key:
             pdf = df[df['product_key'] == selected_key].copy()
             result = forecast_product(pdf, days_ahead=7)
+
+            try:
+                result = forecast_product(pdf, days_ahead=7)
+            except Exception as e:
+                st.error(f"⚠️ Unable to forecast this product. The data may be incomplete or corrupted.")
+                st.info(f"Technical details: {str(e)}")
+                st.stop()
 
             st.markdown("---")
 
