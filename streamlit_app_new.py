@@ -463,7 +463,7 @@ st.markdown(f"""
 <div style="text-align:center; color:#6b7280; font-size:0.8rem; margin-top:-0.5rem; margin-bottom:1rem;">
     📅 Data last updated: {last_data_date}
 </div>
-""", unsafe_allow_html=True
+""", unsafe_allow_html=True)
 
 # ─────────────────────────────────────────
 # 7. TABS
