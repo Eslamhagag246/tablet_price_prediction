@@ -3,7 +3,7 @@
 A data-driven web application that tracks tablet prices across major Egyptian e-commerce websites, forecasts prices for the next 7 days, and helps users decide the best time to buy.
 
 🌐 Live Demo
-👉 Open the App
+👉 [Open the App](https://tabletpricetracker.streamlit.app/)
 
 💡 Project Idea
 The goal of this project is to help users make smarter purchasing decisions by answering two key questions:
