@@ -68,7 +68,7 @@ hr { border-color: #1e2535 !important; }
 # ─────────────────────────────────────────
 @st.cache_data(ttl=86400)
 def load_data():
-    df = pd.read_csv('tablets_cleaned_augmented.csv')
+    df = pd.read_csv('tablets_full_continuous_series.csv')
     
     df['price'] = df['price'].str.replace('EGP','',regex=False)\
                              .str.replace(',','',regex=False)\
