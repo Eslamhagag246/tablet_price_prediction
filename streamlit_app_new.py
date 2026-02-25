@@ -277,16 +277,6 @@ def chart_price_history(result):
     ))
     
     fig.add_trace(go.Scatter(
-        x=[last_hist_date, first_fore_date],
-        y=[last_hist_price, first_fore_price],
-        mode='lines',
-        name='Bridge',
-        line=dict(color='#ffd166', width=1.5, dash='dot'),
-        showlegend=False,
-        hoverinfo='skip'
-    ))
-
-    fig.add_trace(go.Scatter(
         x=fdates, y=fprices,
         mode='lines+markers', name='Forecast',
         line=dict(color='#ffd166', width=2.5, dash='dash'),
