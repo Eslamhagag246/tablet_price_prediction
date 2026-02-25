@@ -106,6 +106,16 @@ def load_data():
 
     # Product key: name + website
     df['product_key'] = df['name'].str.lower().str.strip() + ' || ' + df['website']
+    df_daily = df.groupby(['product_key', 'date']).agg(
+    price      = ('price',      'mean'),
+    name       = ('name',       'first'),
+    brand      = ('brand',      'first'),
+    website    = ('website',    'first'),
+    ram_gb     = ('ram_gb',     'first'),
+    storage_gb = ('storage_gb', 'first'),
+    URL        = ('URL',        'last'),
+    timestamp  = ('timestamp',  'first')
+).reset_index()
 
     # Keep latest URL per product
     df = df.sort_values('timestamp')
@@ -340,11 +350,7 @@ def chart_price_history(result):
         hovertemplate='%{x}<br>Avg EGP %{y:,.0f}<extra></extra>'
     ))
 
-    last_hist_date  = pdf['date'].iloc[-1]
-    last_hist_price = pdf['price'].iloc[-1]
-    first_fore_date  = fdates[0]
-    first_fore_price = fprices[0]
-
+    
     fig.add_trace(go.Scatter(
         x=[last_hist_date, first_fore_date],
         y=[last_hist_price, first_fore_price],
@@ -363,20 +369,7 @@ def chart_price_history(result):
         hovertemplate='%{x}<br>Forecast EGP %{y:,.0f}<extra></extra>'
     ))
 
-    band_dates  = [last_hist_date, first_fore_date] + fdates[1:]
-    band_prices = [last_hist_price, first_fore_price] + list(fprices[1:])
-    upper = [p + mae for p in band_prices]
-    lower = [max(p - mae, 0) for p in band_prices]
-
-    fig.add_trace(go.Scatter(
-        x=band_dates + band_dates[::-1],
-        y=upper + lower[::-1],
-        fill='toself',
-        fillcolor='rgba(255,209,102,0.08)',
-        line=dict(color='rgba(0,0,0,0)'),
-        name='Confidence Band',
-        hoverinfo='skip'
-    ))
+    
     today_str = str(pd.Timestamp.today().date())
     fig.add_shape(
         type="line",
