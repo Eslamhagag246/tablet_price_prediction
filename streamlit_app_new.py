@@ -110,7 +110,7 @@ def load_data():
     df['website'].astype(str) + ' ' +
     df['ram_gb'].astype(str) + ' ' +
     df['storage_gb'].astype(str)
-)]
+)
 
     # Keep latest URL per product
     df = df.sort_values('timestamp')
