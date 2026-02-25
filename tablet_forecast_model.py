@@ -11,7 +11,7 @@ from datetime import timedelta
 # ─────────────────────────────────────────
 # 1. LOAD DATA
 # ─────────────────────────────────────────
-df = pd.read_csv('tablets_cleaned_clean.csv')
+df = pd.read_csv('tablets_full_continuous_series.csv')
 print("=" * 60)
 print("ORIGINAL SHAPE:", df.shape)
 
@@ -19,26 +19,24 @@ print("ORIGINAL SHAPE:", df.shape)
 # 2. PREPROCESSING
 # ─────────────────────────────────────────
 
-# --- 2.1 Clean price
 df['price'] = df['price'].str.replace('EGP', '', regex=False)\
                          .str.replace(',', '', regex=False)\
                          .str.strip().astype(float)
 
-# --- 2.2 Normalize text
 df['brand']   = df['brand'].str.lower().str.strip()
 df['website'] = df['website'].str.lower().str.strip()
 df['name']    = df['name'].str.strip()
 
-# --- 2.3 Parse timestamp
 df['timestamp'] = pd.to_datetime(df['timestamp'])
 df['date']      = df['timestamp'].dt.date
 
-# --- 2.4 Create product key (name + website)
-# This is the core identity of each product listing
-df['product_key'] = df['name'].str.lower().str.strip() + ' || ' + df['website']
+df['product_key'] = (
+    df['name'].str.lower() + ' ' +
+    df['website'].astype(str) + ' ' +
+    df['ram_gb'].astype(str) + ' ' +
+    df['storage_gb'].astype(str)
+)
 
-# --- 2.5 Average duplicate prices on same day for same product
-# Multiple scrapes on the same day → take the mean price
 df_daily = df.groupby(['product_key', 'date']).agg(
     price      = ('price',      'mean'),
     name       = ('name',       'first'),
@@ -58,7 +56,6 @@ print(f"  Rows         : {len(df_daily)}")
 print(f"  Unique products: {df_daily['product_key'].nunique()}")
 print(f"  Date range   : {df_daily['date'].min().date()} → {df_daily['date'].max().date()}")
 
-# --- 2.6 Observation counts per product
 obs_counts = df_daily.groupby('product_key').size()
 print(f"\nObservations per product:")
 print(f"  Min    : {obs_counts.min()}")
@@ -66,15 +63,8 @@ print(f"  Median : {obs_counts.median()}")
 print(f"  Max    : {obs_counts.max()}")
 print(f"  5+ obs : {(obs_counts >= 5).sum()} products")
 print(f"  10+ obs: {(obs_counts >= 10).sum()} products")
-
-# ─────────────────────────────────────────
-# 3. FEATURE ENGINEERING (per product)
-# ─────────────────────────────────────────
 def engineer_features(pdf):
-    """
-    Build time-based features for a single product's price history.
-    pdf: DataFrame with columns [date, price] for one product
-    """
+    
     pdf = pdf.sort_values('date').copy()
 
     # Core time feature: integer day index (0, 1, 2, ...)
@@ -94,69 +84,84 @@ def engineer_features(pdf):
 
     # Price relative to product's own average — is it currently cheap or expensive?
     pdf['price_vs_avg'] = (pdf['price'] - pdf['price'].mean()) / pdf['price'].mean() * 100
-
     return pdf
-
 # ─────────────────────────────────────────
 # 4. MODEL: FORECAST FUNCTION (per product)
 # ─────────────────────────────────────────
-def forecast_product(pdf, days_ahead=7):
-    """
-    Fit a trend model on a single product's price history
-    and forecast the next `days_ahead` days.
-
-    Model choice:
-      - 10+ observations → Polynomial Regression (degree 2) — catches curves
-      - <10 observations → Linear Regression — simple, avoids overfitting
-
-    Returns a dict with forecast prices, confidence, buy signal, and metrics.
-    """
+def forecast_product(pdf, days_ahead=7, test_horizon=None):
+    
     pdf = engineer_features(pdf)
-    n   = len(pdf)
+    n = len(pdf)
 
-    X          = pdf['day_index'].values.reshape(-1, 1)
-    y          = pdf['price'].values
-    last_day   = pdf['day_index'].max()
-    last_date  = pdf['date'].max()
+    X = pdf['day_index'].values.reshape(-1, 1)
+    y = pdf['price'].values
+    dates = pdf['date'].values
+
+    # --- Split into train/test (80/20) ---
+    split = int(n * 0.8)
+    X_train, X_test = X[:split], X[split:]
+    y_train, y_test = y[:split], y[split:]
+    dates_test = dates[split:]   # actual dates of test set
+
+    # --- Train model on training data only ---
+    if len(X_train) >= 10:
+        poly = PolynomialFeatures(degree=2)
+        X_train_poly = poly.fit_transform(X_train)
+        model = LinearRegression().fit(X_train_poly, y_train)
+        model_type = "Polynomial (degree 2)"
+        # For later prediction on test set:
+        if len(X_test) > 0:
+            X_test_poly = poly.transform(X_test)
+            y_pred_test = model.predict(X_test_poly)
+        else:
+            y_pred_test = np.array([])
+    else:
+        model = LinearRegression().fit(X_train, y_train)
+        model_type = "Linear"
+        if len(X_test) > 0:
+            y_pred_test = model.predict(X_test)
+        else:
+            y_pred_test = np.array([])
+
+    # --- Decide what to return: test set predictions OR future forecast ---
+    if test_horizon is not None and len(y_pred_test) > 0:
+        # Use test set predictions
+        n_test = len(y_test)
+        horizon = min(test_horizon, n_test)          # take last 'test_horizon' days
+        forecast_prices = y_pred_test[-horizon:]     # predicted values
+        forecast_dates  = [pd.to_datetime(d) for d in dates_test[-horizon:]]
+        actual_prices   = y_test[-horizon:]          # actual values for comparison
+        # Also store the full test predictions for MAE/R² (already computed earlier)
+    else:
+        # Original future forecast
+        last_day = pdf['day_index'].max()
+        future_X = np.array([[last_day + i] for i in range(1, days_ahead + 1)])
+        if len(X_train) >= 10:
+            future_poly = poly.transform(future_X)
+            forecast_prices = model.predict(future_poly)
+        else:
+            forecast_prices = model.predict(future_X)
+        forecast_dates = [pdf['date'].max() + timedelta(days=i) for i in range(1, days_ahead + 1)]
+        actual_prices = None   # not applicable for future
+
+    # --- Evaluation metrics on full test set ---
+    if len(y_test) > 0:
+        mae = mean_absolute_error(y_test, y_pred_test)
+        r2  = r2_score(y_test, y_pred_test)
+    else:
+        mae, r2 = np.nan, np.nan
+
+    # --- Clip forecasts to reasonable bounds ---
+    min_price = pdf['price'].min()
+    max_price = pdf['price'].max()
+    forecast_prices = np.clip(forecast_prices, min_price * 0.5, max_price * 1.5)
+
+    # --- Other statistics (using full dataset for context) ---
     last_price = pdf['price'].iloc[-1]
     avg_price  = pdf['price'].mean()
-    min_price  = pdf['price'].min()
-    max_price  = pdf['price'].max()
+    trend_pct  = ((forecast_prices[-1] - last_price) / last_price * 100) if len(forecast_prices) > 0 else 0
 
-    # ── Choose model based on data size ──
-    if n >= 10:
-        poly   = PolynomialFeatures(degree=2)
-        X_poly = poly.fit_transform(X)
-        model  = LinearRegression().fit(X_poly, y)
-        y_fit  = model.predict(X_poly)
-
-        future_X    = np.array([[last_day + i] for i in range(1, days_ahead + 1)])
-        future_poly = poly.transform(future_X)
-        forecast    = model.predict(future_poly)
-        model_type  = "Polynomial (degree 2)"
-
-    else:
-        model    = LinearRegression().fit(X, y)
-        y_fit    = model.predict(X)
-        future_X = np.array([[last_day + i] for i in range(1, days_ahead + 1)])
-        forecast = model.predict(future_X)
-        model_type = "Linear"
-
-    # ── Evaluation on training data ──
-    mae = mean_absolute_error(y, y_fit)
-    r2  = r2_score(y, y_fit)
-
-    # ── Clip forecast to realistic bounds ──
-    # Never predict below 50% of min or above 150% of max seen
-    forecast = np.clip(forecast, min_price * 0.5, max_price * 1.5)
-
-    today = pd.Timestamp.today().normalize()
-    forecast_dates = [today + timedelta(days=i) for i in range(1, days_ahead + 1)]
-
-    # ── Trend: % change from today to day 7 ──
-    trend_pct = (forecast[-1] - last_price) / last_price * 100
-
-    # ── Confidence based on number of observations ──
+    # Confidence based on total observations
     if n >= 15:
         confidence = "High"
     elif n >= 7:
@@ -164,57 +169,88 @@ def forecast_product(pdf, days_ahead=7):
     else:
         confidence = "Low"
 
-    # ── Buy Signal Logic ──
     price_vs_avg = (last_price - avg_price) / avg_price * 100
 
+    # --- Buy/Signal logic (same as before, but uses trend from forecast) ---
     if price_vs_avg <= -3 and trend_pct >= 0:
         signal      = "buy"
         signal_text = "🟢 Good Time to Buy"
         signal_desc = (f"Current price is {abs(price_vs_avg):.1f}% below average "
                        f"and is expected to rise. Buy now.")
-
     elif price_vs_avg >= 3 and trend_pct < 0:
         signal      = "wait"
         signal_text = "🔴 Wait — Price May Drop"
         signal_desc = (f"Current price is {price_vs_avg:.1f}% above average "
                        f"and the trend shows it may decrease.")
-
     elif abs(trend_pct) <= 2:
         signal      = "neutral"
         signal_text = "🟡 Price is Stable"
         signal_desc = (f"Price is not expected to change significantly "
-                       f"in the next {days_ahead} days. Current price is fair.")
-
+                       f"in the next {len(forecast_prices)} days. Current price is fair.")
     elif trend_pct > 2:
         signal      = "wait"
         signal_text = "🔴 Price Rising — Buy Soon or Wait"
-        signal_desc = (f"Price is trending upward (~{trend_pct:.1f}% over {days_ahead} days). "
+        signal_desc = (f"Price is trending upward (~{trend_pct:.1f}%). "
                        f"Buy soon if you need it.")
     else:
         signal      = "buy"
         signal_text = "🟢 Price Dropping — Good Time to Buy"
-        signal_desc = (f"Price is expected to drop ~{abs(trend_pct):.1f}% "
-                       f"over the next {days_ahead} days.")
+        signal_desc = (f"Price is expected to drop ~{abs(trend_pct):.1f}%.")
 
     return {
-        'pdf'            : pdf,
-        'forecast_dates' : forecast_dates,
-        'forecast_prices': forecast,
-        'mae'            : mae,
-        'r2'             : r2,
-        'confidence'     : confidence,
-        'signal'         : signal,
-        'signal_text'    : signal_text,
-        'signal_desc'    : signal_desc,
-        'last_price'     : last_price,
-        'avg_price'      : avg_price,
-        'min_price'      : min_price,
-        'max_price'      : max_price,
-        'trend_pct'      : trend_pct,
-        'n_obs'          : n,
-        'model_type'     : model_type,
-        'price_vs_avg'   : price_vs_avg,
+        'pdf'             : pdf,
+        'forecast_dates'  : forecast_dates,
+        'forecast_prices' : forecast_prices,
+        'actual_prices'   : actual_prices,          # new field
+        'mae'             : mae,
+        'r2'              : r2,
+        'confidence'      : confidence,
+        'signal'          : signal,
+        'signal_text'     : signal_text,
+        'signal_desc'     : signal_desc,
+        'last_price'      : last_price,
+        'avg_price'       : avg_price,
+        'min_price'       : min_price,
+        'max_price'       : max_price,
+        'trend_pct'       : trend_pct,
+        'n_obs'           : n,
+        'model_type'      : model_type,
+        'price_vs_avg'    : price_vs_avg,
     }
+all_y_test = []
+all_y_pred = []
+
+for key, grp in df_daily.groupby('product_key'):
+    
+    grp = engineer_features(grp)
+    n = len(grp)
+
+    if n < 5:
+        continue
+
+    X = grp['day_index'].values.reshape(-1,1)
+    y = grp['price'].values
+
+    split = int(n * 0.8)
+
+    X_train, X_test = X[:split], X[split:]
+    y_train, y_test = y[:split], y[split:]
+
+    if len(X_train) >= 10:
+        poly = PolynomialFeatures(degree=2)
+        X_train = poly.fit_transform(X_train)
+        X_test  = poly.transform(X_test)
+
+        model = LinearRegression()
+        model.fit(X_train, y_train)
+        y_pred = model.predict(X_test)
+    else:
+        model = LinearRegression()
+        model.fit(X_train, y_train)
+        y_pred = model.predict(X_test)
+
+    all_y_test.extend(y_test)
+    all_y_pred.extend(y_pred)
 
 # ─────────────────────────────────────────
 # 5. EVALUATE ON ALL PRODUCTS
@@ -284,3 +320,4 @@ for date, price in zip(res['forecast_dates'], res['forecast_prices']):
           f"(range: {low:,.0f} – {high:,.0f})")
 print("-" * 40)
 print(f"  Expected 7-day change: {res['trend_pct']:+.1f}%")
+
