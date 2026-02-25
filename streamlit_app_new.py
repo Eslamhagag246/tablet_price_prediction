@@ -105,7 +105,12 @@ def load_data():
     df['date']      = df['timestamp'].dt.date
 
     # Product key: name + website
-    df['product_key'] = df['name'].str.lower().str.strip() + ' || ' + df['website']
+    df['product_key'] = (
+    df['name'].str.lower() + ' ' +
+    df['website'].astype(str) + ' ' +
+    df['ram_gb'].astype(str) + ' ' +
+    df['storage_gb'].astype(str)
+)]
 
     # Keep latest URL per product
     df = df.sort_values('timestamp')
@@ -144,53 +149,80 @@ def engineer_product(pdf):
 # ─────────────────────────────────────────
 # 3. FORECAST FUNCTION
 # ─────────────────────────────────────────
-def forecast_product(pdf, days_ahead=7):
-    pdf = engineer_product(pdf)
-    n   = len(pdf)
+def forecast_product(pdf, days_ahead=7, test_horizon=None):
+    
+    pdf = engineer_features(pdf)
+    n = len(pdf)
 
     X = pdf['day_index'].values.reshape(-1, 1)
     y = pdf['price'].values
+    dates = pdf['date'].values
 
-    last_day  = pdf['day_index'].max()
-    last_date = pdf['date'].max()
+    # --- Split into train/test (80/20) ---
+    split = int(n * 0.8)
+    X_train, X_test = X[:split], X[split:]
+    y_train, y_test = y[:split], y[split:]
+    dates_test = dates[split:]   # actual dates of test set
+
+    # --- Train model on training data only ---
+    if len(X_train) >= 10:
+        poly = PolynomialFeatures(degree=2)
+        X_train_poly = poly.fit_transform(X_train)
+        model = LinearRegression().fit(X_train_poly, y_train)
+        model_type = "Polynomial (degree 2)"
+        # For later prediction on test set:
+        if len(X_test) > 0:
+            X_test_poly = poly.transform(X_test)
+            y_pred_test = model.predict(X_test_poly)
+        else:
+            y_pred_test = np.array([])
+    else:
+        model = LinearRegression().fit(X_train, y_train)
+        model_type = "Linear"
+        if len(X_test) > 0:
+            y_pred_test = model.predict(X_test)
+        else:
+            y_pred_test = np.array([])
+
+    # --- Decide what to return: test set predictions OR future forecast ---
+    if test_horizon is not None and len(y_pred_test) > 0:
+        # Use test set predictions
+        n_test = len(y_test)
+        horizon = min(test_horizon, n_test)          # take last 'test_horizon' days
+        forecast_prices = y_pred_test[-horizon:]     # predicted values
+        forecast_dates  = [pd.to_datetime(d) for d in dates_test[-horizon:]]
+        actual_prices   = y_test[-horizon:]          # actual values for comparison
+        # Also store the full test predictions for MAE/R² (already computed earlier)
+    else:
+        # Original future forecast
+        last_day = pdf['day_index'].max()
+        future_X = np.array([[last_day + i] for i in range(1, days_ahead + 1)])
+        if len(X_train) >= 10:
+            future_poly = poly.transform(future_X)
+            forecast_prices = model.predict(future_poly)
+        else:
+            forecast_prices = model.predict(future_X)
+        forecast_dates = [pdf['date'].max() + timedelta(days=i) for i in range(1, days_ahead + 1)]
+        actual_prices = None   # not applicable for future
+
+    # --- Evaluation metrics on full test set ---
+    if len(y_test) > 0:
+        mae = mean_absolute_error(y_test, y_pred_test)
+        r2  = r2_score(y_test, y_pred_test)
+    else:
+        mae, r2 = np.nan, np.nan
+
+    # --- Clip forecasts to reasonable bounds ---
+    min_price = pdf['price'].min()
+    max_price = pdf['price'].max()
+    forecast_prices = np.clip(forecast_prices, min_price * 0.5, max_price * 1.5)
+
+    # --- Other statistics (using full dataset for context) ---
     last_price = pdf['price'].iloc[-1]
     avg_price  = pdf['price'].mean()
-    min_price  = pdf['price'].min()
-    max_price  = pdf['price'].max()
+    trend_pct  = ((forecast_prices[-1] - last_price) / last_price * 100) if len(forecast_prices) > 0 else 0
 
-    # Choose model based on data size
-    if n >= 10:
-        poly  = PolynomialFeatures(degree=2)
-        X_poly = poly.fit_transform(X)
-        model  = LinearRegression().fit(X_poly, y)
-        y_fit  = model.predict(X_poly)
-        future_days = np.array([[last_day + i] for i in range(1, days_ahead + 1)])
-        future_poly = poly.transform(future_days)
-        forecast    = model.predict(future_poly)
-        model_type  = "polynomial"
-    else:
-        model = LinearRegression().fit(X, y)
-        y_fit = model.predict(X)
-        future_days = np.array([[last_day + i] for i in range(1, days_ahead + 1)])
-        forecast    = model.predict(future_days)
-        model_type  = "linear"
-
-    # Residuals for confidence band
-    residuals = np.abs(y - y_fit)
-    mae       = residuals.mean()
-    std       = residuals.std() if len(residuals) > 1 else mae
-
-    # Clip forecast to realistic range (not below 50% of min, not above 150% of max)
-    forecast = np.clip(forecast, min_price * 0.5, max_price * 1.5)
-
-    # Forecast dates — start from TODAY (the moment the user searches)
-    today = pd.Timestamp.today().normalize()
-    forecast_dates = [today + timedelta(days=i) for i in range(1, days_ahead + 1)]
-
-    # Trend slope
-    slope = (forecast[-1] - last_price) / days_ahead
-
-    # Confidence based on data points
+    # Confidence based on total observations
     if n >= 15:
         confidence = "High"
     elif n >= 7:
@@ -198,53 +230,55 @@ def forecast_product(pdf, days_ahead=7):
     else:
         confidence = "Low"
 
-    # Buy signal logic
     price_vs_avg = (last_price - avg_price) / avg_price * 100
-    trend_pct    = (forecast[-1] - last_price) / last_price * 100
 
+    # --- Buy/Signal logic (same as before, but uses trend from forecast) ---
     if price_vs_avg <= -3 and trend_pct >= 0:
         signal      = "buy"
         signal_text = "🟢 Good Time to Buy"
-        signal_desc = f"Current price is {abs(price_vs_avg):.1f}% below average and is expected to rise. Buy now before it goes up."
+        signal_desc = (f"Current price is {abs(price_vs_avg):.1f}% below average "
+                       f"and is expected to rise. Buy now.")
     elif price_vs_avg >= 3 and trend_pct < 0:
         signal      = "wait"
         signal_text = "🔴 Wait — Price May Drop"
-        signal_desc = f"Current price is {price_vs_avg:.1f}% above average and the trend shows it may decrease. Consider waiting."
+        signal_desc = (f"Current price is {price_vs_avg:.1f}% above average "
+                       f"and the trend shows it may decrease.")
     elif abs(trend_pct) <= 2:
         signal      = "neutral"
         signal_text = "🟡 Price is Stable"
-        signal_desc = f"Price is not expected to change significantly in the next {days_ahead} days. Current price is close to the average."
+        signal_desc = (f"Price is not expected to change significantly "
+                       f"in the next {len(forecast_prices)} days. Current price is fair.")
     elif trend_pct > 2:
         signal      = "wait"
         signal_text = "🔴 Price Rising — Buy Soon or Wait"
-        signal_desc = f"Price is trending upward (~{trend_pct:.1f}% over {days_ahead} days). Buy soon if you need it, or wait for a potential correction."
+        signal_desc = (f"Price is trending upward (~{trend_pct:.1f}%). "
+                       f"Buy soon if you need it.")
     else:
         signal      = "buy"
-        signal_text = "🟢 Price is Dropping — Good Time to Buy"
-        signal_desc = f"Price is expected to drop ~{abs(trend_pct):.1f}% over the next {days_ahead} days."
+        signal_text = "🟢 Price Dropping — Good Time to Buy"
+        signal_desc = (f"Price is expected to drop ~{abs(trend_pct):.1f}%.")
 
     return {
-        'pdf'            : pdf,
-        'forecast_dates' : forecast_dates,
-        'forecast_prices': forecast,
-        'mae'            : mae,
-        'std'            : std,
-        'slope'          : slope,
-        'confidence'     : confidence,
-        'signal'         : signal,
-        'signal_text'    : signal_text,
-        'signal_desc'    : signal_desc,
-        'last_price'     : last_price,
-        'avg_price'      : avg_price,
-        'min_price'      : min_price,
-        'max_price'      : max_price,
-        'trend_pct'      : trend_pct,
-        'n_obs'          : n,
-        'model_type'     : model_type,
-        'price_vs_avg'   : price_vs_avg,
+        'pdf'             : pdf,
+        'forecast_dates'  : forecast_dates,
+        'forecast_prices' : forecast_prices,
+        'actual_prices'   : actual_prices,          # new field
+        'mae'             : mae,
+        'r2'              : r2,
+        'confidence'      : confidence,
+        'signal'          : signal,
+        'signal_text'     : signal_text,
+        'signal_desc'     : signal_desc,
+        'last_price'      : last_price,
+        'avg_price'       : avg_price,
+        'min_price'       : min_price,
+        'max_price'       : max_price,
+        'trend_pct'       : trend_pct,
+        'n_obs'           : n,
+        'model_type'      : model_type,
+        'price_vs_avg'    : price_vs_avg,
     }
-
-
+    
 # ─────────────────────────────────────────
 # 4. CHART BUILDERS
 # ─────────────────────────────────────────
