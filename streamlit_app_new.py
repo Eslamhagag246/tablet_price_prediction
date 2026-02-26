@@ -89,7 +89,7 @@ hr { border-color: #1e2535 !important; }
 # ─────────────────────────────────────────
 @st.cache_data(ttl=86400)
 def load_data():
-    df = pd.read_csv('tablets_full_continuous_series.csv')
+    df = pd.read_csv('tablets_cleaned_clean.csv')
 
     # Clean price
     df['price'] = df['price'].str.replace('EGP', '', regex=False)\
@@ -275,7 +275,22 @@ def chart_price_history(result):
         line=dict(color='#7b5cf0', width=1.5, dash='dot'),
         hovertemplate='%{x}<br>Avg EGP %{y:,.0f}<extra></extra>'
     ))
-    
+
+    last_hist_date  = pdf['date'].iloc[-1]
+    last_hist_price = pdf['price'].iloc[-1]
+    first_fore_date  = fdates[0]
+    first_fore_price = fprices[0]
+
+    fig.add_trace(go.Scatter(
+        x=[last_hist_date, first_fore_date],
+        y=[last_hist_price, first_fore_price],
+        mode='lines',
+        name='Bridge',
+        line=dict(color='#ffd166', width=1.5, dash='dot'),
+        showlegend=False,
+        hoverinfo='skip'
+    ))
+
     fig.add_trace(go.Scatter(
         x=fdates, y=fprices,
         mode='lines+markers', name='Forecast',
@@ -284,6 +299,20 @@ def chart_price_history(result):
         hovertemplate='%{x}<br>Forecast EGP %{y:,.0f}<extra></extra>'
     ))
 
+    band_dates  = [last_hist_date, first_fore_date] + fdates[1:]
+    band_prices = [last_hist_price, first_fore_price] + list(fprices[1:])
+    upper = [p + mae for p in band_prices]
+    lower = [max(p - mae, 0) for p in band_prices]
+
+    fig.add_trace(go.Scatter(
+        x=band_dates + band_dates[::-1],
+        y=upper + lower[::-1],
+        fill='toself',
+        fillcolor='rgba(255,209,102,0.08)',
+        line=dict(color='rgba(0,0,0,0)'),
+        name='Confidence Band',
+        hoverinfo='skip'
+    ))
     today_str = str(pd.Timestamp.today().date())
     fig.add_shape(
         type="line",
