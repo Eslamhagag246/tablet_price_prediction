@@ -33,9 +33,12 @@ df['name']    = df['name'].str.strip()
 df['timestamp'] = pd.to_datetime(df['timestamp'])
 df['date']      = df['timestamp'].dt.date
 
-# --- 2.4 Create product key (name + website)
-# This is the core identity of each product listing
-df['product_key'] = df['name'].str.lower().str.strip() + ' || ' + df['website']
+df['product_key'] = (
+    df['name'].str.lower() + ' ' +
+    df['website'].astype(str) + ' ' +
+    df['ram_gb'].astype(str) + ' ' +
+    df['storage_gb'].astype(str)
+)
 
 # --- 2.5 Average duplicate prices on same day for same product
 # Multiple scrapes on the same day → take the mean price
