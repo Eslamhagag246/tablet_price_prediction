@@ -91,23 +91,31 @@ hr { border-color: #1e2535 !important; }
 def load_data():
     df = pd.read_csv('tablets_full_continuous_series.csv')
 
-    df['price'] = df['price'].str.replace('EGP', '', regex=False)\
-                             .str.replace(',', '', regex=False)\
-                             .str.strip().astype(float)
+    # Clean price with robust error handling
+    df['price'] = df['price'].astype(str)  # Ensure string first
+    df['price'] = df['price'].str.replace('EGP', '', regex=False)
+    df['price'] = df['price'].str.replace(',', '', regex=False)
+    df['price'] = df['price'].str.strip()
+    
+    # Convert to float with error handling (coerce invalid values to NaN)
+    df['price'] = pd.to_numeric(df['price'], errors='coerce')
+    
+    # Drop rows with invalid prices
+    df = df.dropna(subset=['price'])
 
     # Normalize text
     df['brand']   = df['brand'].str.lower().str.strip()
     df['website'] = df['website'].str.lower().str.strip()
     df['name']    = df['name'].str.strip()
-    # Parse timestamp
-    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    
+    # Parse timestamp (format: MM/DD/YYYY)
+    df['timestamp'] = pd.to_datetime(df['timestamp'], format='%m/%d/%Y')
     df['date']      = df['timestamp'].dt.date
+    df['date'] = pd.to_datetime(df['date'])
 
-    # Product key: name + website
+    # Recreate product_key to ensure consistency (name + website only, not RAM/storage)
+    # This ensures same product on different dates is tracked together
     df['product_key'] = df['name'].str.lower().str.strip() + ' || ' + df['website']
-
-    # Keep latest URL per product
-    df = df.sort_values('timestamp')
 
     # Average duplicate prices on same day for same product
     df_daily = df.groupby(['product_key', 'date']).agg(
@@ -121,12 +129,9 @@ def load_data():
         timestamp = ('timestamp','first')
     ).reset_index()
 
-    df_daily['date'] = pd.to_datetime(df_daily['date'])
     df_daily = df_daily.sort_values(['product_key','date'])
 
     return df_daily
-
-
 # ─────────────────────────────────────────
 # 2. FEATURE ENGINEERING PER PRODUCT
 # ─────────────────────────────────────────
