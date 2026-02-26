@@ -11,7 +11,7 @@ from datetime import timedelta
 # ─────────────────────────────────────────
 # 1. LOAD DATA
 # ─────────────────────────────────────────
-df = pd.read_csv('tablets_cleaned_clean.csv')
+df = pd.read_csv('tablets_full_continuous_series.csv')
 print("=" * 60)
 print("ORIGINAL SHAPE:", df.shape)
 
