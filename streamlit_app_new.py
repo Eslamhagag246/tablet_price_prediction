@@ -92,9 +92,10 @@ def load_data():
     df = pd.read_csv('tablets_full_continuous_series.csv')
 
     # Clean price
-    df['price'] = df['price'].str.replace('EGP', '', regex=False)\
-                             .str.replace(',', '', regex=False)\
-                             .str.strip().astype(float)
+    df['price'] = df['price'].astype(str)  # ✅ Ensure string first
+    df['price'] = df['price'].str.replace(...)
+    df['price'] = pd.to_numeric(df['price'], errors='coerce')  # ✅ Convert invalid to NaN
+    df = df.dropna(subset=['price'])  # ✅ Remove invalid rows
 
     # Normalize text
     df['brand']   = df['brand'].str.lower().str.strip()
