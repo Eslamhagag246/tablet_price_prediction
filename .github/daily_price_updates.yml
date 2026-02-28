@@ -1,0 +1,60 @@
+name: Daily Price Update
+
+# Runs every day at 3 AM UTC (automatically)
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:  # Allows manual trigger from GitHub UI
+
+jobs:
+  scrape-and-update:
+    runs-on: ubuntu-latest
+    
+    steps:
+      # 1. Checkout your repository
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      # 2. Set up Python
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      # 3. Install dependencies
+      - name: Install dependencies
+        run: |
+          pip install requests beautifulsoup4 pandas selenium lxml
+      
+      # 4. Run your scraper
+      - name: Run automated scraper
+        run: |
+          python automated_scraper.py
+        continue-on-error: false
+      
+      # 5. Commit and push changes if any
+      - name: Commit and push if changes detected
+        run: |
+          git config --local user.name "Price Tracker Bot"
+          git config --local user.email "bot@pricetracker.com"
+          git add tablets_full_continuous_series.csv
+          
+          # Only commit if there are changes
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "🤖 Auto-update prices: $(date +'%Y-%m-%d %H:%M')"
+            git push
+            echo "✅ Prices updated and pushed to GitHub"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      # 6. Notify on failure (optional)
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "❌ Price update failed on $(date)"
+          # You can add email notification here if needed
