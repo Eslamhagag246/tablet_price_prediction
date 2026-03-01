@@ -100,7 +100,7 @@ headers = {
 def scrape_product(url, website):
     """Scrape a single product"""
     try:
-        response = session.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
+        response = session.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
 
         soup = BeautifulSoup(response.text, 'html.parser')
