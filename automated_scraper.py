@@ -1,18 +1,3 @@
-"""
-automated_scraper.py
-====================
-Automated daily price scraper for tracked products.
-
-This script:
-1. Loads existing products from CSV
-2. Scrapes ONLY those products (not all tablets)
-3. Cleans data automatically
-4. Updates CSV with new prices
-5. No manual intervention needed!
-
-Runs daily via GitHub Actions.
-"""
-
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
@@ -105,22 +90,24 @@ def extract_stock(soup, website):
                 return 'Out of stock'
     
     return 'In stock'  # Default
-
+session = requests.Session()
+headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",}
 def scrape_product(url, website):
     """Scrape a single product"""
     try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-        
-        response = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
+        response = session.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
-        
-        soup = BeautifulSoup(response.content, 'html.parser')
-        
+
+        soup = BeautifulSoup(response.text, 'html.parser')
+
         price = extract_price(soup, website)
         stock = extract_stock(soup, website)
-        
+
         if price:
             return {'price': price, 'stock': stock}
         else:
@@ -151,7 +138,8 @@ for idx, row in products_to_track.iterrows():
     website = row['website']
     url = row['URL']
     
-    print(f"[{idx+1}/{len(products_to_track)}] {product_name[:40]:<40} | {website.upper():<10}", end=" ")
+    website_safe = str(website) if pd.notna(website) else "UNKNOWN"
+    print(f"[{idx+1}/{len(products_to_track)}] {product_name[:40]:<40} | {website_safe.upper():<10}", end=" ")
     
     # Scrape
     result = scrape_product(url, website)
@@ -193,6 +181,18 @@ if len(new_data) == 0:
 print(f"\n🧹 Cleaning {len(new_data)} new records...")
 
 new_df = pd.DataFrame(new_data)
+
+new_df['name'] = new_df['name'].astype(str)
+new_df['name'] = new_df['name'].str.replace(',', '', regex=False)
+new_df['name'] = new_df['name'].str.replace('/', '', regex=False)
+new_df['name'] = new_df['name'].str.replace(r'(?i)2 years warranty', '', regex=True)
+new_df['name'] = new_df['name'].str.replace(r'(?i)tax paid', '', regex=True)
+colors = ['cosmic orange', 'deep', 'lavender', 'teal', 'sage']
+for color in colors:
+    new_df['name'] = new_df['name'].str.replace(fr'(?i){color}', '', regex=True)
+
+# Remove multiple spaces
+new_df['name'] = new_df['name'].str.replace(r'\s+', ' ', regex=True).str.strip()
 
 # Clean prices
 new_df['price'] = new_df['price'].astype(str)
