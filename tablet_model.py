@@ -1,10 +1,3 @@
-"""
-tablet_model.py
-===============
-Price forecasting model for tablets.
-Contains all modeling logic separated from the Streamlit UI.
-"""
-
 import pandas as pd
 import numpy as np
 from sklearn.linear_model import LinearRegression
@@ -13,24 +6,12 @@ from sklearn.metrics import mean_absolute_error, r2_score
 from datetime import timedelta
 import warnings
 warnings.filterwarnings('ignore')
-
-
 # ─────────────────────────────────────────
 # 1. DATA LOADING & PREPROCESSING
 # ─────────────────────────────────────────
-def load_and_preprocess_data(filepath='tablets_full_continuous_series.csv'):
-    """
-    Load and preprocess tablet price data.
-    
-    Args:
-        filepath: Path to CSV file
-        
-    Returns:
-        DataFrame with daily aggregated prices
-    """
+def load_and_preprocess_data(filepath='tablets_cleaned_continuous.csv'):
     df = pd.read_csv(filepath)
 
-    # Clean price
     df['price'] = df['price'].astype(str)
     df['price'] = df['price'].str.replace('EGP', '', regex=False)
     df['price'] = df['price'].str.replace(',', '', regex=False)
@@ -38,20 +19,22 @@ def load_and_preprocess_data(filepath='tablets_full_continuous_series.csv'):
     df['price'] = pd.to_numeric(df['price'], errors='coerce')
     df = df.dropna(subset=['price'])
 
-    # Normalize text
     df['brand']   = df['brand'].str.lower().str.strip()
     df['website'] = df['website'].str.lower().str.strip()
     df['name']    = df['name'].str.strip()
     
-    # Parse timestamp
     df['timestamp'] = pd.to_datetime(df['timestamp'], format='%m/%d/%Y')
     df['date']      = df['timestamp'].dt.date
     df['date']      = pd.to_datetime(df['date'])
 
     # Product key
-    df['product_key'] = df['name'].str.lower().str.strip() + ' || ' + df['website']
+    df['product_key'] = (
+    df['name'].str.lower().str.strip() + ' ' +
+    df['website'].str.lower().str.strip() + ' ' +
+    df['ram_gb'].astype(str) + ' ' +
+    df['storage_gb'].astype(str)
+)
 
-    # Daily average
     df_daily = df.groupby(['product_key', 'date']).agg(
         price     = ('price',   'mean'),
         name      = ('name',    'first'),
@@ -72,15 +55,6 @@ def load_and_preprocess_data(filepath='tablets_full_continuous_series.csv'):
 # 2. FEATURE ENGINEERING
 # ─────────────────────────────────────────
 def engineer_features(pdf):
-    """
-    Create time-based features for a single product.
-    
-    Args:
-        pdf: DataFrame for one product with [date, price]
-        
-    Returns:
-        DataFrame with added features
-    """
     pdf = pdf.sort_values('date').copy()
     
     pdf['day_index']   = (pdf['date'] - pdf['date'].min()).dt.days
@@ -90,26 +64,10 @@ def engineer_features(pdf):
     pdf['volatility']  = pdf['price'].rolling(window=3, min_periods=1).std().fillna(0)
     
     return pdf
-
-
 # ─────────────────────────────────────────
 # 3. FORECASTING MODEL
 # ─────────────────────────────────────────
 def forecast_product(pdf, days_ahead=7):
-    """
-    Forecast future prices for a single product.
-    
-    Model selection:
-    - 10+ observations: Polynomial Regression (degree 2)
-    - <10 observations: Linear Regression
-    
-    Args:
-        pdf: DataFrame for one product
-        days_ahead: Number of days to forecast
-        
-    Returns:
-        Dictionary with forecast results and metadata
-    """
     pdf = engineer_features(pdf)
     n = len(pdf)
 
@@ -122,7 +80,6 @@ def forecast_product(pdf, days_ahead=7):
     min_price  = pdf['price'].min()
     max_price  = pdf['price'].max()
 
-    # Model selection
     if n >= 10:
         poly   = PolynomialFeatures(degree=2)
         X_poly = poly.fit_transform(X)
@@ -204,23 +161,10 @@ def forecast_product(pdf, days_ahead=7):
         'model_type'     : model_type,
         'price_vs_avg'   : price_vs_avg,
     }
-
-
 # ─────────────────────────────────────────
 # 4. BATCH FORECASTING (Optional - for precomputing)
 # ─────────────────────────────────────────
 def forecast_all_products(df_daily, min_obs=3):
-    """
-    Generate forecasts for all products.
-    Useful for precomputing results.
-    
-    Args:
-        df_daily: Preprocessed daily data
-        min_obs: Minimum observations required
-        
-    Returns:
-        Dictionary: {product_key: forecast_result}
-    """
     forecasts = {}
     
     for key, grp in df_daily.groupby('product_key'):
