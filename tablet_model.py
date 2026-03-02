@@ -62,7 +62,10 @@ def engineer_features(pdf):
     pdf['rolling_avg'] = pdf['price'].rolling(window=3, min_periods=1).mean()
     pdf['pct_change']  = pdf['price'].pct_change().fillna(0)
     pdf['volatility']  = pdf['price'].rolling(window=3, min_periods=1).std().fillna(0)
-    
+
+    pdf['ram_normalized'] = pdf['ram_gb'] / 16.0 
+    pdf['storage_normalized'] = pdf['storage_gb'] / 1024.0  
+    pdf['specs_score'] = (pdf['ram_gb'] / 4.0) + (pdf['storage_gb'] / 128.0)
     return pdf
 # ─────────────────────────────────────────
 # 3. FORECASTING MODEL
@@ -71,7 +74,7 @@ def forecast_product(pdf, days_ahead=7):
     pdf = engineer_features(pdf)
     n = len(pdf)
 
-    X = pdf['day_index'].values.reshape(-1, 1)
+    X = pdf[['day_index', 'ram_normalized', 'storage_normalized', 'specs_score']].values
     y = pdf['price'].values
 
     last_day   = pdf['day_index'].max()
@@ -79,7 +82,10 @@ def forecast_product(pdf, days_ahead=7):
     avg_price  = pdf['price'].mean()
     min_price  = pdf['price'].min()
     max_price  = pdf['price'].max()
-
+    
+    ram_norm = pdf['ram_normalized'].iloc[-1]
+    storage_norm = pdf['storage_normalized'].iloc[-1]
+    specs = pdf['specs_score'].iloc[-1]
     if n >= 10:
         poly   = PolynomialFeatures(degree=2)
         X_poly = poly.fit_transform(X)
