@@ -65,7 +65,7 @@ hr { border-color: #1e2535 !important; }
 @st.cache_data(ttl=86400)  # Cache for 24 hours
 def load_data():
     """Load and cache the preprocessed data"""
-    return load_and_preprocess_data('tablets_full_continuous_series.csv')
+    return load_and_preprocess_data('tablets_cleaned_continuous.csv')
 
 
 # ─────────────────────────────────────────
