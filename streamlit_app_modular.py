@@ -55,6 +55,18 @@ div[data-testid="stSelectbox"] > div {
     border-radius: 10px !important; color: #e8eaf0 !important;
 }
 hr { border-color: #1e2535 !important; }
+
+/* Filter badges */
+.filter-badge {
+    display: inline-block;
+    background: #1e2535;
+    border: 1px solid #2e3545;
+    border-radius: 8px;
+    padding: 0.4rem 0.8rem;
+    margin: 0.2rem;
+    font-size: 0.85rem;
+    color: #a0a8b8;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -64,15 +76,11 @@ hr { border-color: #1e2535 !important; }
 # ─────────────────────────────────────────
 @st.cache_data(ttl=86400)  # Cache for 24 hours
 def load_data():
-    """Load and cache the preprocessed data"""
     return load_and_preprocess_data('tablets_cleaned_continuous.csv')
-
-
-# ─────────────────────────────────────────
+# ────────────────────────────────────────
 # CHART FUNCTION
 # ─────────────────────────────────────────
 def chart_price_history(result):
-    """Create price history + forecast chart"""
     pdf = result['pdf']
     fdates = result['forecast_dates']
     fprices = result['forecast_prices']
@@ -164,12 +172,12 @@ def chart_price_history(result):
 # LOAD DATA
 # ─────────────────────────────────────────
 df = load_data()
-
+df['clean_name'] = df['name']
 # ─────────────────────────────────────────
 # HEADER
 # ─────────────────────────────────────────
 st.markdown('<div class="hero-title">📊 Tablet Price Tracker</div>', unsafe_allow_html=True)
-st.markdown('<div class="hero-sub">Track price history · Forecast next 7 days · Know when to buy</div>', 
+st.markdown('<div class="hero-sub">Advanced search with RAM, Storage & Website filters</div>', 
             unsafe_allow_html=True)
 
 last_data_date = pd.to_datetime(df['date'].max()).strftime('%B %d, %Y')
@@ -182,50 +190,126 @@ st.markdown(f"""
 st.markdown("---")
 
 # ─────────────────────────────────────────
-# SEARCH & FILTER
+# ADVANCED SEARCH & FILTERS
 # ─────────────────────────────────────────
-st.markdown("### 🔍 Search for a Tablet")
+st.markdown("### 🔍 Advanced Search")
 
-col1, col2, col3 = st.columns([2, 1, 1])
-with col1:
-    search = st.text_input("Product name", placeholder="e.g. iPad, Samsung...")
-with col2:
-    brand_f = st.selectbox("Brand", ['All'] + sorted([b.title() for b in df['brand'].unique()]))
-with col3:
-    website_f = st.selectbox("Website", ['All'] + sorted([w.upper() for w in df['website'].unique()]))
+# Search by product name
+search = st.text_input("🔎 Search product name", 
+                       placeholder="e.g. iPad, Samsung Galaxy, Honor Pad...",
+                       help="Search for tablets by name")
 
-# Filter
-filtered = df.copy()
+st.markdown("#### 📱 Filter Options")
+
+# Initial filter by search
 if search:
-    filtered = filtered[filtered['name'].str.lower().str.contains(search.lower(), na=False)]
-if brand_f != 'All':
-    filtered = filtered[filtered['brand'] == brand_f.lower()]
-if website_f != 'All':
-    filtered = filtered[filtered['website'] == website_f.lower()]
+    filtered = df[df['clean_name'].str.lower().str.contains(search.lower(), na=False)]
+else:
+    filtered = df.copy()
 
-# Product summary
-product_summary = filtered.groupby('product_key').agg(
-    name=('name','first'), website=('website','first'),
-    n_obs=('price','count')
-).reset_index().sort_values('n_obs', ascending=False)
+# ✅ STEP 1: Get available options based on search
+available_ram = sorted(filtered['ram_gb'].dropna().unique().astype(int).tolist())
+available_storage = sorted(filtered['storage_gb'].dropna().unique().astype(int).tolist())
+available_websites = sorted(filtered['website'].str.upper().unique().tolist())
+available_brands = sorted(filtered['brand'].str.title().unique().tolist())
 
-if product_summary.empty:
-    st.warning("No products found. Try a different search.")
-    st.stop()
+# Create 4 columns for filters
+col1, col2, col3, col4 = st.columns(4)
 
-st.markdown(f"**{len(product_summary)} products found**")
+with col1:
+    ram_options = st.multiselect(
+        "💾 RAM (GB)",
+        options=available_ram,
+        default=[],
+        help="Select RAM capacity"
+    )
+
+with col2:
+    storage_options = st.multiselect(
+        "💿 Storage (GB)",
+        options=available_storage,
+        default=[],
+        help="Select storage capacity"
+    )
+
+with col3:
+    website_options = st.multiselect(
+        "🛒 Website",
+        options=available_websites,
+        default=[],
+        help="Select websites to search"
+    )
+
+with col4:
+    brand_options = st.multiselect(
+        "🏷️ Brand",
+        options=available_brands,
+        default=[],
+        help="Select brands"
+    )
+
+# ✅ STEP 2: Apply all filters
+if ram_options:
+    filtered = filtered[filtered['ram_gb'].isin(ram_options)]
+
+if storage_options:
+    filtered = filtered[filtered['storage_gb'].isin(storage_options)]
+
+if website_options:
+    filtered = filtered[filtered['website'].str.upper().isin(website_options)]
+
+if brand_options:
+    filtered = filtered[filtered['brand'].str.title().isin(brand_options)]
+
+# ✅ STEP 3: Show active filters
+active_filters = []
+if search:
+    active_filters.append(f"Search: {search}")
+if ram_options:
+    active_filters.append(f"RAM: {', '.join(map(str, ram_options))}GB")
+if storage_options:
+    active_filters.append(f"Storage: {', '.join(map(str, storage_options))}GB")
+if website_options:
+    active_filters.append(f"Website: {', '.join(website_options)}")
+if brand_options:
+    active_filters.append(f"Brand: {', '.join(brand_options)}")
+
+if active_filters:
+    st.markdown("**Active Filters:**")
+    filter_html = " ".join([f'<span class="filter-badge">{f}</span>' for f in active_filters])
+    st.markdown(filter_html, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────
 # PRODUCT SELECTION
 # ─────────────────────────────────────────
+if filtered.empty:
+    st.warning("⚠️ No products found. Try different filters.")
+    st.stop()
+
+# Group by product_key for selection
+product_summary = filtered.groupby('product_key').agg(
+    clean_name=('clean_name','first'),
+    website=('website','first'),
+    ram_gb=('ram_gb','first'),
+    storage_gb=('storage_gb','first'),
+    brand=('brand','first'),
+    n_obs=('price','count')
+).reset_index().sort_values('n_obs', ascending=False)
+
+st.markdown(f"**Found {len(product_summary)} products**")
+
+# ✅ CLEAN PRODUCT DISPLAY FORMAT
 selected_key = st.selectbox(
-    "Select a product",
+    "📱 Select a product",
     options=product_summary['product_key'].tolist(),
     format_func=lambda k: (
-        f"{product_summary[product_summary['product_key']==k]['name'].values[0]} | "
-        f"{product_summary[product_summary['product_key']==k]['website'].values[0].upper()} "
-        f"({product_summary[product_summary['product_key']==k]['n_obs'].values[0]} obs)"
-    )
+        f"{product_summary[product_summary['product_key']==k]['clean_name'].values[0]} | "
+        f"{product_summary[product_summary['product_key']==k]['ram_gb'].values[0]}GB RAM + "
+        f"{product_summary[product_summary['product_key']==k]['storage_gb'].values[0]}GB Storage | "
+        f"{product_summary[product_summary['product_key']==k]['website'].values[0].upper()} | "
+        f"({product_summary[product_summary['product_key']==k]['n_obs'].values[0]} days tracked)"
+    ),
+    help="Select a product to see price forecast"
 )
 
 if not selected_key:
@@ -236,7 +320,20 @@ if not selected_key:
 # ─────────────────────────────────────────
 pdf = df[df['product_key'] == selected_key].copy()
 
-with st.spinner("Forecasting..."):
+# Get product info
+product_info = product_summary[product_summary['product_key'] == selected_key].iloc[0]
+
+# Display product info
+st.markdown("---")
+st.markdown(f"### 📱 {product_info['clean_name']}")
+
+info_col1, info_col2, info_col3, info_col4 = st.columns(4)
+info_col1.metric("💾 RAM", f"{product_info['ram_gb']}GB")
+info_col2.metric("💿 Storage", f"{product_info['storage_gb']}GB")
+info_col3.metric("🛒 Website", product_info['website'].upper())
+info_col4.metric("📊 Data Points", f"{product_info['n_obs']} days")
+
+with st.spinner("🤖 Generating forecast..."):
     try:
         result = forecast_product(pdf, days_ahead=7)
     except Exception as e:
