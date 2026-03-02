@@ -32,7 +32,7 @@ jobs:
       # 4. Run optimized scraper
       - name: Run scraper
         run: |
-          python optimized_final_scraper.py
+          python automated_scraper.py
         continue-on-error: false
       
       # 5. Commit and push if changes
@@ -51,9 +51,3 @@ jobs:
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      
-      # 6. Notify on failure (optional)
-      - name: Notify on failure
-        if: failure()
-        run: |
-          echo "❌ Scraping failed on $(date)"
