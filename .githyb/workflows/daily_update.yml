@@ -3,7 +3,7 @@ name: Daily Price Update (Optimized)
 # Runs every day at 3 AM UTC
 on:
   schedule:
-    - cron: '1 40 * * *'
+    - cron: '0 3 * * *'
   workflow_dispatch:  # Manual trigger option
 
 jobs:
