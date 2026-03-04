@@ -6,12 +6,14 @@ from sklearn.metrics import mean_absolute_error, r2_score
 from datetime import timedelta
 import warnings
 warnings.filterwarnings('ignore')
+
 # ─────────────────────────────────────────
 # 1. DATA LOADING & PREPROCESSING
 # ─────────────────────────────────────────
 def load_and_preprocess_data(filepath='tablets_cleaned_continuous.csv'):
     df = pd.read_csv(filepath)
 
+    # Clean price
     df['price'] = df['price'].astype(str)
     df['price'] = df['price'].str.replace('EGP', '', regex=False)
     df['price'] = df['price'].str.replace(',', '', regex=False)
@@ -19,22 +21,25 @@ def load_and_preprocess_data(filepath='tablets_cleaned_continuous.csv'):
     df['price'] = pd.to_numeric(df['price'], errors='coerce')
     df = df.dropna(subset=['price'])
 
+    # Normalize text
     df['brand']   = df['brand'].str.lower().str.strip()
     df['website'] = df['website'].str.lower().str.strip()
     df['name']    = df['name'].str.strip()
     
-    df['timestamp'] = pd.to_datetime(df['timestamp'], format='%m/%d/%Y')
+    # Parse timestamp
+    df['timestamp'] = pd.to_datetime(df['timestamp'], format='%m/%d/%Y', errors='coerce')
     df['date']      = df['timestamp'].dt.date
     df['date']      = pd.to_datetime(df['date'])
 
     # Product key
     df['product_key'] = (
-    df['name'].str.lower().str.strip() + ' ' +
-    df['website'].str.lower().str.strip() + ' ' +
-    df['ram_gb'].astype(str) + ' ' +
-    df['storage_gb'].astype(str)
-)
+        df['name'].str.lower().str.strip() + ' ' +
+        df['website'].str.lower() + ' ' +
+        df['ram_gb'].astype(str) + ' ' +
+        df['storage_gb'].astype(str)
+    )
 
+    # Daily average
     df_daily = df.groupby(['product_key', 'date']).agg(
         price     = ('price',   'mean'),
         name      = ('name',    'first'),
@@ -62,11 +67,15 @@ def engineer_features(pdf):
     pdf['rolling_avg'] = pdf['price'].rolling(window=3, min_periods=1).mean()
     pdf['pct_change']  = pdf['price'].pct_change().fillna(0)
     pdf['volatility']  = pdf['price'].rolling(window=3, min_periods=1).std().fillna(0)
-
-    pdf['ram_normalized'] = pdf['ram_gb'] / 16.0 
-    pdf['storage_normalized'] = pdf['storage_gb'] / 1024.0  
+    
+    # ✅ Device specs features (for price adjustment)
+    pdf['ram_normalized'] = pdf['ram_gb'] / 16.0
+    pdf['storage_normalized'] = pdf['storage_gb'] / 1024.0
     pdf['specs_score'] = (pdf['ram_gb'] / 4.0) + (pdf['storage_gb'] / 128.0)
+    
     return pdf
+
+
 # ─────────────────────────────────────────
 # 3. FORECASTING MODEL
 # ─────────────────────────────────────────
@@ -74,7 +83,8 @@ def forecast_product(pdf, days_ahead=7):
     pdf = engineer_features(pdf)
     n = len(pdf)
 
-    X = pdf[['day_index', 'ram_normalized', 'storage_normalized', 'specs_score']].values
+    # ✅ Use only day_index for model (avoids polynomial dimension issues)
+    X_time = pdf[['day_index']].values
     y = pdf['price'].values
 
     last_day   = pdf['day_index'].max()
@@ -83,22 +93,25 @@ def forecast_product(pdf, days_ahead=7):
     min_price  = pdf['price'].min()
     max_price  = pdf['price'].max()
     
-    ram_norm = pdf['ram_normalized'].iloc[-1]
-    storage_norm = pdf['storage_normalized'].iloc[-1]
-    specs = pdf['specs_score'].iloc[-1]
+    # ✅ Specs used for post-prediction adjustment
+    specs_score = pdf['specs_score'].iloc[-1]
+    avg_specs = pdf['specs_score'].mean()
+    specs_factor = specs_score / avg_specs if avg_specs > 0 else 1.0
+
+    # Model selection
     if n >= 10:
         poly   = PolynomialFeatures(degree=2)
-        X_poly = poly.fit_transform(X)
+        X_poly = poly.fit_transform(X_time)
         model  = LinearRegression().fit(X_poly, y)
         y_fit  = model.predict(X_poly)
         
-        future_X    = np.array([[last_day + i] for i in range(1, days_ahead + 1)])
+        future_X = np.array([[last_day + i] for i in range(1, days_ahead + 1)])
         future_poly = poly.transform(future_X)
         forecast    = model.predict(future_poly)
         model_type  = "polynomial"
     else:
-        model    = LinearRegression().fit(X, y)
-        y_fit    = model.predict(X)
+        model    = LinearRegression().fit(X_time, y)
+        y_fit    = model.predict(X_time)
         future_X = np.array([[last_day + i] for i in range(1, days_ahead + 1)])
         forecast = model.predict(future_X)
         model_type = "linear"
@@ -130,23 +143,23 @@ def forecast_product(pdf, days_ahead=7):
     if price_vs_avg <= -3 and trend_pct >= 0:
         signal = "buy"
         signal_text = "🟢 Good Time to Buy"
-        signal_desc = f"Current price is {abs(price_vs_avg):.1f}% below average and is expected to rise. Buy now before it goes up."
+        signal_desc = f"Current price is {abs(price_vs_avg):.1f}% below average and is expected to rise. Buy now."
     elif price_vs_avg >= 3 and trend_pct < 0:
         signal = "wait"
         signal_text = "🔴 Wait — Price May Drop"
-        signal_desc = f"Current price is {price_vs_avg:.1f}% above average and the trend shows it may decrease. Consider waiting."
+        signal_desc = f"Current price is {price_vs_avg:.1f}% above average and may decrease."
     elif abs(trend_pct) <= 2:
         signal = "neutral"
         signal_text = "🟡 Price is Stable"
-        signal_desc = f"Price is not expected to change significantly in the next {days_ahead} days. Current price is close to the average."
+        signal_desc = f"Price not expected to change significantly in {days_ahead} days."
     elif trend_pct > 2:
         signal = "wait"
-        signal_text = "🔴 Price Rising — Buy Soon or Wait"
-        signal_desc = f"Price is trending upward (~{trend_pct:.1f}% over {days_ahead} days). Buy soon if you need it, or wait for a potential correction."
+        signal_text = "🔴 Price Rising"
+        signal_desc = f"Price trending up ~{trend_pct:.1f}% over {days_ahead} days."
     else:
         signal = "buy"
-        signal_text = "🟢 Price is Dropping — Good Time to Buy"
-        signal_desc = f"Price is expected to drop ~{abs(trend_pct):.1f}% over the next {days_ahead} days."
+        signal_text = "🟢 Price Dropping"
+        signal_desc = f"Price expected to drop ~{abs(trend_pct):.1f}%."
 
     return {
         'pdf'            : pdf,
@@ -167,8 +180,9 @@ def forecast_product(pdf, days_ahead=7):
         'model_type'     : model_type,
         'price_vs_avg'   : price_vs_avg,
     }
+
 # ─────────────────────────────────────────
-# 4. BATCH FORECASTING (Optional - for precomputing)
+# 4. BATCH FORECASTING (Optional)
 # ─────────────────────────────────────────
 def forecast_all_products(df_daily, min_obs=3):
     forecasts = {}
