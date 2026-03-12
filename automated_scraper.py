@@ -7,10 +7,7 @@ import random
 import re
 from concurrent.futures import ThreadPoolExecutor
 
-if sys.platform == "win32":
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-
-CSV_FILE = 'tablets_full_continuous_series.csv'
+CSV_FILE = 'tablets_cleaned_continuous.csv'
 
 # Correct selectors for all websites
 SELECTORS = {
@@ -77,16 +74,19 @@ def clean_price(price_text):
     return None
 
 async def scrape_product_fast(context, url, website):
-    """Optimized scraper - 3x faster"""
     page = None
     try:
         page = await context.new_page()
         await page.add_init_script(STEALTH_JS)
+        
         await asyncio.sleep(random.uniform(0.5, 1))  
+        
         await page.goto(url, 
-                       wait_until='domcontentloaded',  
+                       wait_until='domcontentloaded', 
                        timeout=30000) 
+
         await asyncio.sleep(random.uniform(1, 1.5)) 
+        
         price_selectors = get_selectors(website)
         price = None
         
@@ -125,7 +125,6 @@ async def scrape_product_fast(context, url, website):
         return None
 
 def get_last_price(df, product_name, website):
-    """Get last known price for a failed product"""
     product_data = df[(df['name'] == product_name) & (df['website'] == website)]
     if not product_data.empty:
         # Get most recent price
@@ -138,15 +137,13 @@ async def main():
     print("🚀 OPTIMIZED FINAL SCRAPER")
     print("="*80)
     
-    # Load data
     try:
         df = pd.read_csv(CSV_FILE)
         print(f"✅ Loaded {len(df)} records")
     except:
         print(f"❌ File not found")
         sys.exit(1)
-    
-    # Remove duplicates
+        
     print(f"\n🔍 Removing duplicates...")
     before = len(df)
     products = df[['name','website','URL','brand','ram_gb','storage_gb']]\
@@ -167,80 +164,34 @@ async def main():
     start_time = datetime.now()
     
     async with async_playwright() as p:
-
         browser = None
         context = None
-
-        for idx, row in products.iterrows():
-
-            # 🔥 Restart browser every 100 products
-            if idx % 100 == 0:
-                if browser:
-                    try:
-                        await context.close()
-                        await browser.close()
-                    except:
-                        pass
-
-                browser = await p.chromium.launch(
-                    headless=True,
-                    args=[
-                        '--disable-blink-features=AutomationControlled',
-                        '--no-sandbox',
-                        '--disable-dev-shm-usage',
-                        '--disable-gpu',
-                        '--disable-setuid-sandbox'
-                    ]
-                )
-
-                context = await browser.new_context(
-                    user_agent=random.choice(USER_AGENTS),
-                    viewport={'width': 1920, 'height': 1080}
-                )
         
-        # Process products
-        for idx, row in products.iterrows():
-            current = idx + 1  # ✅ FIXED COUNTER
-            total = len(products)
-            website = row['website']
-            product_name = row['name']
+        try:
+            browser = await p.chromium.launch(
+                headless=True,
+                args=['--disable-blink-features=AutomationControlled']
+            )
             
-            # ✅ Progress bar with percentage
-            progress = (current / total) * 100
-            print(f"[{current}/{total}] ({progress:.1f}%) {product_name[:35]:<35} | {website.upper():<10}", 
-                  end=" ", flush=True)
+            context = await browser.new_context(
+                user_agent=random.choice(USER_AGENTS),
+                viewport={'width': 1920, 'height': 1080}
+            )
             
-            result = await scrape_product_fast(context, row['URL'], website)
-            
-            if result:
-                # Success!
-                new_data.append({
-                    'name': product_name,
-                    'price': result['price'],
-                    'stock': result['stock'],
-                    'photo': '',
-                    'URL': row['URL'],
-                    'website': website,
-                    'timestamp': datetime.now().strftime('%m/%d/%Y'),
-                    'brand': row['brand'],
-                    'ram_gb': row['ram_gb'],
-                    'storage_gb': row['storage_gb'],
-                    'product_key': ''
-                })
-                print(f"✅ {result['price']}")
-                success += 1
-                website_stats[website] = website_stats.get(website, {'success': 0, 'fail': 0})
-                website_stats[website]['success'] += 1
-                
-            else:
-                # ✅ RETRY ONCE
-                print(f"🔄", end=" ", flush=True)
-                await asyncio.sleep(random.uniform(2, 3))
+            for idx, row in products.iterrows():
+                current = idx + 1  
+                total = len(products)
+                website = row['website']
+                product_name = row['name']
+        
+                progress = (current / total) * 100
+                print(f"[{current}/{total}] ({progress:.1f}%) {product_name[:35]:<35} | {website.upper():<10}", 
+                      end=" ", flush=True)
                 
                 result = await scrape_product_fast(context, row['URL'], website)
                 
                 if result:
-                    # Retry success!
+                    # Success!
                     new_data.append({
                         'name': product_name,
                         'price': result['price'],
@@ -255,18 +206,21 @@ async def main():
                         'product_key': ''
                     })
                     print(f"✅ {result['price']}")
-                    retry_success += 1
+                    success += 1
                     website_stats[website] = website_stats.get(website, {'success': 0, 'fail': 0})
                     website_stats[website]['success'] += 1
-                else:
-                    # ✅ FAILED → Use last known price with today's date
-                    last_price = get_last_price(df, product_name, website)
                     
-                    if last_price:
+                else:
+                    print(f"🔄", end=" ", flush=True)
+                    await asyncio.sleep(random.uniform(2, 3))
+                    
+                    result = await scrape_product_fast(context, row['URL'], website)
+                    
+                    if result:
                         new_data.append({
                             'name': product_name,
-                            'price': last_price, 
-                            'stock': 'In stock',
+                            'price': result['price'],
+                            'stock': result['stock'],
                             'photo': '',
                             'URL': row['URL'],
                             'website': website,
@@ -276,23 +230,51 @@ async def main():
                             'storage_gb': row['storage_gb'],
                             'product_key': ''
                         })
-                        print(f"♻️  {last_price} (last known)")
+                        print(f"✅ {result['price']}")
+                        retry_success += 1
+                        website_stats[website] = website_stats.get(website, {'success': 0, 'fail': 0})
+                        website_stats[website]['success'] += 1
                     else:
-                        print(f"❌ Failed (no history)")
-                    
-                    fail += 1
-                    website_stats[website] = website_stats.get(website, {'success': 0, 'fail': 0})
-                    website_stats[website]['fail'] += 1
+                        last_price = get_last_price(df, product_name, website)
+                        
+                        if last_price:
+                            new_data.append({
+                                'name': product_name,
+                                'price': last_price, 
+                                'stock': 'In stock',
+                                'photo': '',
+                                'URL': row['URL'],
+                                'website': website,
+                                'timestamp': datetime.now().strftime('%m/%d/%Y'),  
+                                'brand': row['brand'],
+                                'ram_gb': row['ram_gb'],
+                                'storage_gb': row['storage_gb'],
+                                'product_key': ''
+                            })
+                            print(f"♻️  {last_price} (last known)")
+                        else:
+                            print(f"❌ Failed (no history)")
+                        
+                        fail += 1
+                        website_stats[website] = website_stats.get(website, {'success': 0, 'fail': 0})
+                        website_stats[website]['fail'] += 1
         
-        await context.close()
-        await browser.close()
-    
-    # Calculate time
+        finally:
+            if context:
+                try:
+                    await context.close()
+                except:
+                    pass
+            
+            if browser:
+                try:
+                    await browser.close()
+                except:
+                    pass
+
     end_time = datetime.now()
     duration = (end_time - start_time).total_seconds()
     avg_time = duration / len(products) if len(products) > 0 else 0
-    
-    # Process results
     if not new_data:
         print("\n⚠️  No data")
         return
@@ -307,26 +289,14 @@ async def main():
         new_df['storage_gb'].astype(str)
     )
     
-    # Merge
     combined = pd.concat([df, new_df], ignore_index=True)
-    
-    # Remove same-day duplicates
-    combined['date_check'] = pd.to_datetime(
-        combined['timestamp'], format='%m/%d/%Y', errors='coerce'
-    ).dt.date
-    before_dedup = len(combined)
-    combined = combined.drop_duplicates(subset=['name', 'website', 'date_check','price'], keep='last')
-    after_dedup = len(combined)
-    combined = combined.drop('date_check', axis=1)
-    
-    # Sort
     combined['ts_sort'] = pd.to_datetime(combined['timestamp'], format='%m/%d/%Y', errors='coerce')
     combined = combined.sort_values('ts_sort')
     combined = combined.drop('ts_sort', axis=1)
     
-    # Save
     combined.to_csv(CSV_FILE, index=False)
     
+    print("✅ CSV uploaded to GitHub successfully!")
     # Summary
     print("\n" + "="*80)
     print("📊 SCRAPING SUMMARY")
@@ -338,10 +308,10 @@ async def main():
     print(f"Total failures:       {sum(1 for d in new_data if d['price'] is None)} ❌")
     print(f"\nSuccess rate:         {(success + retry_success)/len(products)*100:.1f}%")
     print(f"\nNew rows added:       {len(new_df)}")
-    print(f"Duplicates removed:   {before_dedup - after_dedup}")
+    #print(f"Duplicates removed:   {before_dedup - after_dedup}")
     print(f"Total rows in CSV:    {len(combined)}")
     
-    # ✅ PERFORMANCE STATS
+ 
     print(f"\n⚡ PERFORMANCE:")
     print(f"   Total time:        {duration:.1f} seconds ({duration/60:.1f} minutes)")
     print(f"   Avg per product:   {avg_time:.2f} seconds")
@@ -356,8 +326,8 @@ async def main():
         rate = stats['success'] / total_site * 100 if total_site > 0 else 0
         print(f"   {website.upper():<12} {stats['success']}/{total_site} ({rate:.1f}%)")
     
+    
     print("="*80)
     print("✅ Done! Upload CSV to GitHub.")
-
 if __name__ == "__main__":
     asyncio.run(main())
